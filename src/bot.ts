@@ -5,6 +5,7 @@ import { PositionManager } from './services/positionManager.js';
 import { OrderQueue, QueuedOrder } from './services/orderQueue.js';
 import { StateManager } from './services/stateManager.js';
 import { PositionReconciler } from './services/positionReconciler.js';
+import { RiskManager } from './services/riskManager.js';
 import { Trader } from './services/trader.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
@@ -19,6 +20,7 @@ export class CopyTradingBot {
   private stateManager: StateManager;
   private reconciler: PositionReconciler | null = null;
   private reconcileInterval: NodeJS.Timeout | null = null;
+  private riskManager: RiskManager | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
   private isRunning = false;
@@ -147,6 +149,20 @@ export class CopyTradingBot {
         }
       }, 60 * 60 * 1000); // Every hour
       console.log('[Reconciler] Periodic check enabled (every 1h)');
+
+      // Initialize risk manager
+      this.riskManager = new RiskManager(
+        {
+          stopLossPercent: -25,    // Sell if position drops 25%
+          takeProfitPercent: 100,  // Sell if position doubles
+          maxTradeAgeSeconds: 60,  // Skip trades older than 1 minute
+          maxSpreadPercent: 0.10,  // Skip if spread > 10%
+        },
+        this.stateManager,
+        this.trader,
+        this.config.dryRun
+      );
+      this.riskManager.startMonitoring();
     }
 
     // Initialize trade monitor
@@ -189,6 +205,15 @@ export class CopyTradingBot {
     if (tradePrice > this.config.maxProbability) {
       console.log(`[Filter] Skipped ${wallet.alias}'s trade: ${trade.outcome} @ $${trade.price} (prob too high)`);
       return;
+    }
+
+    // Risk checks (stale trade, wide spread)
+    if (this.riskManager) {
+      const riskCheck = await this.riskManager.checkTradeSignal(trade.timestamp, trade.asset);
+      if (!riskCheck.passed) {
+        console.log(`[Risk] Skipped ${wallet.alias}'s trade: ${riskCheck.reason}`);
+        return;
+      }
     }
 
     // For SELL orders, check if we have the position
@@ -404,6 +429,10 @@ export class CopyTradingBot {
 
     if (this.reconcileInterval) {
       clearInterval(this.reconcileInterval);
+    }
+
+    if (this.riskManager) {
+      this.riskManager.stopMonitoring();
     }
 
     // Save state before exit
