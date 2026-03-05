@@ -22,6 +22,11 @@ export const defaultConfig: CopyConfig = {
   maxPercentagePerTrade: 10, // Max 10% of your account per trade
   minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
   maxProbability: 0.95, // Skip trades with >95% probability (low upside)
+  // Trading settings
+  enableTrading: false, // Disabled by default - set to true to execute trades
+  dryRun: true, // Simulate trades without executing (safe mode)
+  privateKey: undefined, // Set via PRIVATE_KEY env var
+  funderAddress: undefined, // Set via FUNDER_ADDRESS env var (optional)
 };
 
 export function loadConfig(): CopyConfig {
@@ -81,6 +86,23 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.MAX_PROBABILITY) {
     config.maxProbability = parseFloat(process.env.MAX_PROBABILITY);
+  }
+
+  // Trading settings
+  if (process.env.ENABLE_TRADING === 'true') {
+    config.enableTrading = true;
+  }
+
+  if (process.env.DRY_RUN === 'false') {
+    config.dryRun = false;
+  }
+
+  if (process.env.PRIVATE_KEY) {
+    config.privateKey = process.env.PRIVATE_KEY;
+  }
+
+  if (process.env.FUNDER_ADDRESS) {
+    config.funderAddress = process.env.FUNDER_ADDRESS;
   }
 
   return config;

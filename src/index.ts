@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { TradeMonitor } from './services/tradeMonitor.js';
 import { PositionSizer } from './services/positionSizer.js';
+import { Trader } from './services/trader.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
 import { TradeSignal, WalletConfig } from './types/index.js';
@@ -14,15 +15,7 @@ async function main() {
 
   if (config.wallets.length === 0) {
     console.log('\nNo wallets configured to track.');
-    console.log('Add wallets to track in one of these ways:\n');
-    console.log('1. Edit src/config.ts and add wallets to the wallets array');
-    console.log('2. Set TRACK_WALLETS environment variable as JSON array');
-    console.log('\nExample wallet format:');
-    console.log(JSON.stringify({
-      address: '0x1234...abcd',
-      alias: 'WhaleTrader',
-      enabled: true,
-    }, null, 2));
+    console.log('Add wallets in src/config.ts or set TRACK_WALLETS env var');
     return;
   }
 
@@ -36,6 +29,29 @@ async function main() {
     minTradeSize: config.minTradeSize,
     maxPercentage: config.maxPercentagePerTrade,
   });
+
+  // Initialize trader (if trading is enabled)
+  let trader: Trader | null = null;
+  if (config.enableTrading) {
+    if (!config.privateKey) {
+      console.error('\n❌ Trading enabled but PRIVATE_KEY not set!');
+      console.log('Set PRIVATE_KEY environment variable to enable trading.');
+      return;
+    }
+
+    trader = new Trader({
+      privateKey: config.privateKey,
+      funderAddress: config.funderAddress,
+      dryRun: config.dryRun,
+    });
+
+    try {
+      await trader.initialize();
+    } catch (err) {
+      console.error('Failed to initialize trader:', err);
+      return;
+    }
+  }
 
   // Initialize trade monitor
   const monitor = new TradeMonitor({
@@ -73,6 +89,7 @@ async function main() {
     console.log(`Price: $${trade.price} (${(tradePrice * 100).toFixed(1)}% probability)`);
 
     // Calculate position size
+    let finalSize = 0;
     try {
       const sizing = await positionSizer.calculatePositionSize(trade, wallet.address);
 
@@ -85,13 +102,17 @@ async function main() {
       console.log(`  Proportional: $${sizing.recommendedSize.toFixed(2)}`);
       console.log(`  Final size: $${sizing.cappedSize.toFixed(2)} (${sizing.reason})`);
 
+      finalSize = sizing.cappedSize;
+
       if (sizing.cappedSize === 0) {
         console.log(`\n⏭️  Skipping trade (${sizing.reason})`);
         console.log('='.repeat(50) + '\n');
         return;
       }
     } catch (err) {
-      console.log(`\n  [Could not calculate position size]`);
+      console.log(`\n  [Could not calculate position size - skipping]`);
+      console.log('='.repeat(50) + '\n');
+      return;
     }
 
     // Get current market price
@@ -102,7 +123,6 @@ async function main() {
       console.log(`  Bid: $${spread.bid} | Ask: $${spread.ask} | Spread: $${spread.spread}`);
 
       // Calculate potential slippage
-      const tradePrice = parseFloat(String(trade.price));
       if (trade.side === 'BUY') {
         const askPrice = parseFloat(spread.ask);
         const slippage = ((askPrice - tradePrice) / tradePrice * 100).toFixed(2);
@@ -116,7 +136,32 @@ async function main() {
       console.log(`\n  [Could not fetch current price]`);
     }
 
-    console.log('\n📋 Trade ready to copy');
+    // Execute trade if trading is enabled
+    if (trader && config.enableTrading && finalSize > 0) {
+      console.log(`\n🔄 Executing trade...`);
+
+      // Add delay if configured
+      if (config.copyDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, config.copyDelayMs));
+      }
+
+      const result = await trader.copyTrade(trade, finalSize);
+
+      if (result.success) {
+        console.log(`\n✅ Trade ${config.dryRun ? 'SIMULATED' : 'EXECUTED'} successfully!`);
+        if (result.orderId) {
+          console.log(`  Order ID: ${result.orderId}`);
+        }
+        if (result.details) {
+          console.log(`  ${result.details.side} $${finalSize.toFixed(2)} @ $${result.details.price.toFixed(4)}`);
+        }
+      } else {
+        console.log(`\n❌ Trade failed: ${result.error}`);
+      }
+    } else if (!config.enableTrading) {
+      console.log('\n📋 Trade ready to copy (trading disabled)');
+    }
+
     console.log('='.repeat(50) + '\n');
   });
 
@@ -143,6 +188,13 @@ async function main() {
   console.log(`Tracking: ${config.wallets.filter(w => w.enabled).map(w => w.alias).join(', ')}`);
   console.log(`Your account: $${config.userAccountSize} | Max per trade: $${config.maxPositionSize}`);
   console.log(`Probability filter: ${config.minProbability * 100}% - ${config.maxProbability * 100}%`);
+
+  if (config.enableTrading) {
+    console.log(`Trading: ${config.dryRun ? '🔶 DRY RUN (simulated)' : '🟢 LIVE'}`);
+  } else {
+    console.log(`Trading: ⚪ DISABLED (monitor only)`);
+  }
+
   console.log(`Polling: every ${config.pollingIntervalMs / 1000}s`);
   console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
 }

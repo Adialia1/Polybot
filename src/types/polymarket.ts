@@ -92,4 +92,9 @@ export interface CopyConfig {
   // Probability filters (price = probability on Polymarket)
   minProbability: number; // Skip trades below this (e.g., 0.05 = 5%)
   maxProbability: number; // Skip trades above this (e.g., 0.95 = 95%)
+  // Trading settings
+  enableTrading: boolean; // Enable actual trade execution
+  dryRun: boolean; // If true, simulate trades without executing
+  privateKey?: string; // Polygon wallet private key
+  funderAddress?: string; // Proxy wallet address (if using Magic/email wallet)
 }
