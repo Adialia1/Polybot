@@ -1,0 +1,67 @@
+import { CopyConfig } from './types/index.js';
+
+// Default configuration
+export const defaultConfig: CopyConfig = {
+  wallets: [
+    {
+      address: '0x2005d16a84ceefa912d4e380cd32e7ff827875ea',
+      alias: 'RN1',
+      enabled: true,
+    },
+    {
+      address: '0x6480542954b70a674a74bd1a6015dec362dc8dc5',
+      alias: 'tripping',
+      enabled: true,
+    },
+  ],
+  pollingIntervalMs: 1000, // Poll every 1 second
+  copyDelayMs: 500, // Delay before copying trade
+  maxPositionSize: 100, // Max $100 per position
+  minTradeSize: 5, // Minimum $5 trade size
+};
+
+export function loadConfig(): CopyConfig {
+  const config = { ...defaultConfig };
+
+  // Load wallets from environment variable if set
+  const walletsEnv = process.env.TRACK_WALLETS;
+  if (walletsEnv) {
+    try {
+      const wallets = JSON.parse(walletsEnv);
+      if (Array.isArray(wallets)) {
+        config.wallets = wallets;
+      }
+    } catch {
+      console.error('Failed to parse TRACK_WALLETS environment variable');
+    }
+  }
+
+  // Override from env vars
+  if (process.env.POLLING_INTERVAL_MS) {
+    config.pollingIntervalMs = parseInt(process.env.POLLING_INTERVAL_MS, 10);
+  }
+
+  // Auto-adjust polling interval based on wallet count to respect rate limits
+  // Polymarket /trades limit: 200 req/10s = 20 req/sec
+  // Target: stay under 50% of limit (10 req/sec max)
+  const enabledWallets = config.wallets.filter(w => w.enabled).length;
+  const minIntervalMs = Math.ceil((enabledWallets / 10) * 1000); // 10 wallets = 1s min
+  if (config.pollingIntervalMs < minIntervalMs) {
+    console.log(`[Config] Auto-adjusted polling to ${minIntervalMs}ms for ${enabledWallets} wallets (rate limit protection)`);
+    config.pollingIntervalMs = minIntervalMs;
+  }
+
+  if (process.env.COPY_DELAY_MS) {
+    config.copyDelayMs = parseInt(process.env.COPY_DELAY_MS, 10);
+  }
+
+  if (process.env.MAX_POSITION_SIZE) {
+    config.maxPositionSize = parseFloat(process.env.MAX_POSITION_SIZE);
+  }
+
+  if (process.env.MIN_TRADE_SIZE) {
+    config.minTradeSize = parseFloat(process.env.MIN_TRADE_SIZE);
+  }
+
+  return config;
+}

@@ -1,0 +1,28 @@
+{
+  "name": "polybot",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "positions": "tsx src/index.ts positions",
+    "trades": "tsx src/index.ts trades"
+  },
+  "keywords": ["polymarket", "trading", "bot", "copy-trading"],
+  "author": "",
+  "license": "ISC",
+  "description": "Polymarket trade copier bot",
+  "dependencies": {
+    "@types/node": "25.3.3",
+    "axios": "1.13.6",
+    "dotenv": "17.3.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "ws": "8.19.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.1"
+  }
+}
