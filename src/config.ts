@@ -18,6 +18,8 @@ export const defaultConfig: CopyConfig = {
   copyDelayMs: 500, // Delay before copying trade
   maxPositionSize: 100, // Max $100 per position
   minTradeSize: 5, // Minimum $5 trade size
+  userAccountSize: 1000, // Your account size in USD
+  maxPercentagePerTrade: 10, // Max 10% of your account per trade
 };
 
 export function loadConfig(): CopyConfig {
@@ -61,6 +63,14 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.MIN_TRADE_SIZE) {
     config.minTradeSize = parseFloat(process.env.MIN_TRADE_SIZE);
+  }
+
+  if (process.env.USER_ACCOUNT_SIZE) {
+    config.userAccountSize = parseFloat(process.env.USER_ACCOUNT_SIZE);
+  }
+
+  if (process.env.MAX_PERCENTAGE_PER_TRADE) {
+    config.maxPercentagePerTrade = parseFloat(process.env.MAX_PERCENTAGE_PER_TRADE);
   }
 
   return config;

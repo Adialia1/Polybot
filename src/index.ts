@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { TradeMonitor } from './services/tradeMonitor.js';
+import { PositionSizer } from './services/positionSizer.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
 import { TradeSignal, WalletConfig } from './types/index.js';
@@ -28,6 +29,14 @@ async function main() {
   // Initialize CLOB API for price data
   const clobApi = new ClobApiClient();
 
+  // Initialize position sizer for smart sizing
+  const positionSizer = new PositionSizer({
+    userAccountSize: config.userAccountSize,
+    maxPositionSize: config.maxPositionSize,
+    minTradeSize: config.minTradeSize,
+    maxPercentage: config.maxPercentagePerTrade,
+  });
+
   // Initialize trade monitor
   const monitor = new TradeMonitor({
     wallets: config.wallets,
@@ -51,11 +60,33 @@ async function main() {
     console.log(`Size: ${trade.size} shares`);
     console.log(`Price: $${trade.price}`);
 
+    // Calculate position size
+    try {
+      const sizing = await positionSizer.calculatePositionSize(trade, wallet.address);
+
+      console.log(`\n📊 Position Sizing:`);
+      console.log(`  Trader's trade: $${sizing.originalTradeValue.toFixed(2)}`);
+      console.log(`  Trader's account: $${sizing.traderAccountSize.toFixed(2)}`);
+      console.log(`  Trade %: ${sizing.tradePercentage.toFixed(3)}% of their account`);
+      console.log(`  ─────────────────────`);
+      console.log(`  Your account: $${sizing.yourAccountSize.toFixed(2)}`);
+      console.log(`  Proportional: $${sizing.recommendedSize.toFixed(2)}`);
+      console.log(`  Final size: $${sizing.cappedSize.toFixed(2)} (${sizing.reason})`);
+
+      if (sizing.cappedSize === 0) {
+        console.log(`\n⏭️  Skipping trade (${sizing.reason})`);
+        console.log('='.repeat(50) + '\n');
+        return;
+      }
+    } catch (err) {
+      console.log(`\n  [Could not calculate position size]`);
+    }
+
     // Get current market price
     try {
       const spread = await clobApi.getSpread(trade.asset);
 
-      console.log(`\nCurrent Market:`);
+      console.log(`\n💹 Current Market:`);
       console.log(`  Bid: $${spread.bid} | Ask: $${spread.ask} | Spread: $${spread.spread}`);
 
       // Calculate potential slippage
@@ -98,6 +129,7 @@ async function main() {
 
   console.log('\n✅ Bot is running!');
   console.log(`Tracking: ${config.wallets.filter(w => w.enabled).map(w => w.alias).join(', ')}`);
+  console.log(`Your account: $${config.userAccountSize} | Max per trade: $${config.maxPositionSize}`);
   console.log(`Polling: every ${config.pollingIntervalMs / 1000}s`);
   console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
 }

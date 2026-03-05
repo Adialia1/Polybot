@@ -10,7 +10,12 @@
     "positions": "tsx src/index.ts positions",
     "trades": "tsx src/index.ts trades"
   },
-  "keywords": ["polymarket", "trading", "bot", "copy-trading"],
+  "keywords": [
+    "polymarket",
+    "trading",
+    "bot",
+    "copy-trading"
+  ],
   "author": "",
   "license": "ISC",
   "description": "Polymarket trade copier bot",
@@ -20,6 +25,7 @@
     "dotenv": "17.3.1",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
+    "viem": "2.47.0",
     "ws": "8.19.0"
   },
   "devDependencies": {

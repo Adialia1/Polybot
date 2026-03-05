@@ -87,4 +87,6 @@ export interface CopyConfig {
   copyDelayMs: number;
   maxPositionSize: number;
   minTradeSize: number;
+  userAccountSize: number;
+  maxPercentagePerTrade: number;
 }
