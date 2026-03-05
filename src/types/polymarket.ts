@@ -79,6 +79,7 @@ export interface WalletConfig {
   address: string;
   alias: string;
   enabled: boolean;
+  allocation?: number; // 0-100, percentage of position size to use for this trader (default: 100)
 }
 
 export interface CopyConfig {
@@ -94,6 +95,8 @@ export interface CopyConfig {
   maxProbability: number; // Skip trades above this (e.g., 0.95 = 95%)
   // Market blacklist
   blacklistKeywords: string[]; // Keywords to block (e.g., ["NBA", "NFL", "soccer"])
+  // Position limits
+  maxOpenPositions: number; // Max number of open positions (0 = unlimited)
   // Trading settings
   enableTrading: boolean; // Enable actual trade execution
   dryRun: boolean; // If true, simulate trades without executing
@@ -102,4 +105,6 @@ export interface CopyConfig {
   // Retry settings
   maxRetries: number; // Max retry attempts for failed orders (default: 3)
   retryDelayMs: number; // Base delay between retries in ms (default: 2000)
+  // Daily loss limit
+  dailyLossLimit: number; // Max daily loss in USD (e.g., 10 = stop if down $10, 0 = disabled)
 }

@@ -8,16 +8,16 @@
 - [ ] Send daily summary (positions, P&L, trades count)
 - [ ] Config: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID in .env
 
-### 2. Daily Loss Limit
-- [ ] Track daily P&L in StateManager
-- [ ] Stop trading if daily loss exceeds limit (e.g., $10 or 30%)
-- [ ] Reset at midnight UTC
-- [ ] Config: DAILY_LOSS_LIMIT in .env
+### 2. Daily Loss Limit ✅
+- [x] Track daily P&L in StateManager
+- [x] Stop trading if daily loss exceeds limit (e.g., $10 or 30%)
+- [x] Reset at midnight UTC
+- [x] Config: DAILY_LOSS_LIMIT in .env
 
-### 3. Per-Trader Allocation
-- [ ] Add `allocation` field to wallet config (0-100%)
-- [ ] Scale position size by trader's allocation
-- [ ] Example: RN1 gets 60%, tripping gets 40%
+### 3. Per-Trader Allocation ✅
+- [x] Add `allocation` field to wallet config (0-100%)
+- [x] Scale position size by trader's allocation
+- [x] Example: RN1 gets 60%, tripping gets 40%
 
 ### 4. Market Blacklist
 - [ ] Add BLACKLIST_KEYWORDS in config (e.g., "NBA", "NFL", "soccer")
@@ -42,10 +42,10 @@
 - [ ] Sell if price drops X% from peak (e.g., 15%)
 - [ ] More sophisticated than fixed stop loss
 
-### 8. Max Open Positions Limit
-- [ ] Config: MAX_OPEN_POSITIONS (e.g., 10)
-- [ ] Skip new BUY signals if at limit
-- [ ] Still allow SELL signals
+### 8. Max Open Positions Limit ✅
+- [x] Config: MAX_OPEN_POSITIONS (e.g., 10)
+- [x] Skip new BUY signals if at limit
+- [x] Still allow SELL signals
 
 ### 9. Conflict Resolution
 - [ ] Detect when tracked traders make opposite trades on same market
@@ -85,15 +85,15 @@
 
 ## Implementation Order (Parallel Batches)
 
-### Batch 1 (No dependencies between these)
-- [ ] 1. Telegram Notifications
-- [ ] 4. Market Blacklist
-- [ ] 5. Retry Logic
+### Batch 1 (No dependencies between these) ✅ DONE
+- [x] 1. Telegram Notifications
+- [x] 4. Market Blacklist
+- [x] 5. Retry Logic
 
-### Batch 2
-- [ ] 2. Daily Loss Limit
-- [ ] 3. Per-Trader Allocation
-- [ ] 8. Max Open Positions
+### Batch 2 ✅ DONE
+- [x] 2. Daily Loss Limit
+- [x] 3. Per-Trader Allocation
+- [x] 8. Max Open Positions
 
 ### Batch 3
 - [ ] 6. Performance Tracking

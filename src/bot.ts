@@ -77,6 +77,11 @@ export class CopyTradingBot {
       console.log(`  Failed: ${stats.failedTrades}`);
       console.log(`  Volume: $${stats.totalVolume.toFixed(2)}`);
       console.log(`  Running since: ${new Date(stats.startTime).toLocaleString()}`);
+
+      // Show daily P&L status
+      const dailyPnL = this.stateManager.getDailyPnL();
+      const dailyPnLDate = this.stateManager.getDailyPnLDate();
+      console.log(`  Daily P&L (${dailyPnLDate}): $${dailyPnL.toFixed(2)}`);
     }
 
     // Initialize position manager if we have a funder address
@@ -239,6 +244,26 @@ export class CopyTradingBot {
       }
     }
 
+    // Check daily loss limit for BUY signals only (allow sells to close positions)
+    if (trade.side === 'BUY' && this.config.dailyLossLimit > 0) {
+      if (this.stateManager.isDailyLossLimitExceeded(this.config.dailyLossLimit)) {
+        const dailyPnL = this.stateManager.getDailyPnL();
+        console.log(`[DailyLimit] Skipped ${wallet.alias}'s BUY on "${trade.title}" - daily loss limit exceeded (P&L: $${dailyPnL.toFixed(2)}, limit: -$${this.config.dailyLossLimit})`);
+        return;
+      }
+    }
+
+    // Check max open positions limit for BUY signals only
+    if (trade.side === 'BUY' && this.config.maxOpenPositions > 0) {
+      const currentPositions = this.stateManager.getOpenPositionsCount();
+      // Only count as new position if we don't already have this asset
+      const isNewPosition = !this.stateManager.hasPosition(trade.asset);
+      if (isNewPosition && currentPositions >= this.config.maxOpenPositions) {
+        console.log(`[Limit] Skipped ${wallet.alias}'s BUY on "${trade.title}" - at max positions (${currentPositions}/${this.config.maxOpenPositions})`);
+        return;
+      }
+    }
+
     // For SELL orders, check if we have the position
     if (trade.side === 'SELL') {
       const hasPosition = this.stateManager.hasPosition(trade.asset);
@@ -278,13 +303,25 @@ export class CopyTradingBot {
       console.log(`  Proportional: $${sizing.recommendedSize.toFixed(2)}`);
       console.log(`  Final size: $${sizing.cappedSize.toFixed(2)} (${sizing.reason})`);
 
-      finalSize = sizing.cappedSize;
-
       if (sizing.cappedSize === 0) {
         console.log(`\n⏭️  Skipping trade (${sizing.reason})`);
         console.log('='.repeat(50) + '\n');
         return;
       }
+
+      // Apply per-trader allocation
+      const allocation = wallet.allocation ?? 100; // Default to 100% if not specified
+      const allocatedSize = sizing.cappedSize * (allocation / 100);
+      console.log(`  Allocation: ${allocation}% -> $${allocatedSize.toFixed(2)}`);
+
+      // Check if allocated size is below minimum trade size
+      if (allocatedSize < this.config.minTradeSize) {
+        console.log(`\n⏭️  Skipping trade (allocated size $${allocatedSize.toFixed(2)} below minimum $${this.config.minTradeSize})`);
+        console.log('='.repeat(50) + '\n');
+        return;
+      }
+
+      finalSize = allocatedSize;
     } catch (err) {
       console.log(`\n  [Could not calculate position size - skipping]`);
       console.log('='.repeat(50) + '\n');
@@ -407,6 +444,28 @@ export class CopyTradingBot {
           result,
         });
 
+        // Update daily P&L
+        // For BUY: We spend money (negative P&L equal to the amount spent)
+        // For SELL: We realize P&L based on sell price vs avg cost
+        if (result.details) {
+          let pnlChange = 0;
+          if (order.trade.side === 'BUY') {
+            // When buying, the immediate P&L impact is the cost (negative)
+            // We treat it as neutral (0) since we're acquiring an asset
+            // The actual P&L will be realized on SELL
+            pnlChange = 0;
+          } else {
+            // When selling, calculate realized P&L
+            // P&L = (sell price - avg entry price) * shares sold
+            const position = this.stateManager.getPosition(order.trade.asset);
+            const avgPrice = position?.avgPrice || parseFloat(String(order.trade.price));
+            const sellPrice = result.details.price;
+            const sharesSold = result.details.size;
+            pnlChange = (sellPrice - avgPrice) * sharesSold;
+          }
+          this.stateManager.updateDailyPnL(pnlChange);
+        }
+
         this.orderQueue.completeOrder(order.id, result);
 
         // Send Telegram notification for successful trade
@@ -475,7 +534,9 @@ export class CopyTradingBot {
 
   private printStatus(): void {
     console.log('\n✅ Bot is running!');
-    console.log(`Tracking: ${this.config.wallets.filter(w => w.enabled).map(w => w.alias).join(', ')}`);
+    const enabledWallets = this.config.wallets.filter(w => w.enabled);
+    const walletInfo = enabledWallets.map(w => `${w.alias} (${w.allocation ?? 100}%)`).join(', ');
+    console.log(`Tracking: ${walletInfo}`);
     console.log(`Your account: $${this.config.userAccountSize} | Max per trade: $${this.config.maxPositionSize}`);
     console.log(`Probability filter: ${this.config.minProbability * 100}% - ${this.config.maxProbability * 100}%`);
 
@@ -492,9 +553,23 @@ export class CopyTradingBot {
     console.log(`Polling: every ${this.config.pollingIntervalMs / 1000}s`);
     console.log(`Retry: max ${this.config.maxRetries} attempts, ${this.config.retryDelayMs}ms base delay`);
 
-    if (this.positionManager) {
-      const positions = this.positionManager.getPositions();
-      console.log(`Current positions: ${positions.length}`);
+    // Show position count with limit if configured
+    const currentPositions = this.stateManager.getOpenPositionsCount();
+    if (this.config.maxOpenPositions > 0) {
+      console.log(`Positions: ${currentPositions}/${this.config.maxOpenPositions}`);
+    } else {
+      console.log(`Positions: ${currentPositions} (no limit)`);
+    }
+
+    // Show daily P&L and loss limit status
+    const dailyPnL = this.stateManager.getDailyPnL();
+    const dailyPnLDate = this.stateManager.getDailyPnLDate();
+    if (this.config.dailyLossLimit > 0) {
+      const isLimitExceeded = this.stateManager.isDailyLossLimitExceeded(this.config.dailyLossLimit);
+      const status = isLimitExceeded ? 'LIMIT EXCEEDED - new trades blocked' : 'OK';
+      console.log(`Daily P&L (${dailyPnLDate}): $${dailyPnL.toFixed(2)} / -$${this.config.dailyLossLimit} (${status})`);
+    } else {
+      console.log(`Daily P&L (${dailyPnLDate}): $${dailyPnL.toFixed(2)} (no limit)`);
     }
   }
 

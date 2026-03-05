@@ -7,6 +7,7 @@ export const defaultConfig: CopyConfig = {
       address: '0x2005d16a84ceefa912d4e380cd32e7ff827875ea',
       alias: 'RN1',
       enabled: true,
+      allocation: 100, // 100% of calculated position size
     },
   ],
   pollingIntervalMs: 1000, // Poll every 1 second
@@ -18,6 +19,7 @@ export const defaultConfig: CopyConfig = {
   minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
   maxProbability: 0.95, // Skip trades with >95% probability (low upside)
   blacklistKeywords: [], // Keywords to block (set via BLACKLIST_KEYWORDS env var)
+  maxOpenPositions: 0, // Max open positions (0 = unlimited)
   // Trading settings
   enableTrading: false, // Disabled by default - set to true to execute trades
   dryRun: true, // Simulate trades without executing (safe mode)
@@ -26,6 +28,8 @@ export const defaultConfig: CopyConfig = {
   // Retry settings
   maxRetries: 3, // Max retry attempts for failed orders
   retryDelayMs: 2000, // Base delay between retries (uses exponential backoff)
+  // Daily loss limit
+  dailyLossLimit: 0, // Max daily loss in USD (0 = disabled)
 };
 
 export function loadConfig(): CopyConfig {
@@ -119,6 +123,16 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.RETRY_DELAY_MS) {
     config.retryDelayMs = parseInt(process.env.RETRY_DELAY_MS, 10);
+  }
+
+  // Daily loss limit (0 = disabled)
+  if (process.env.DAILY_LOSS_LIMIT) {
+    config.dailyLossLimit = parseFloat(process.env.DAILY_LOSS_LIMIT);
+  }
+
+  // Max open positions (0 = unlimited)
+  if (process.env.MAX_OPEN_POSITIONS) {
+    config.maxOpenPositions = parseInt(process.env.MAX_OPEN_POSITIONS, 10);
   }
 
   return config;
