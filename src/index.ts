@@ -45,11 +45,23 @@ async function main() {
 
   // Handle new trades detected
   monitor.on('trade', async (signal: TradeSignal, wallet: WalletConfig) => {
+    const trade = signal.trade;
+    const tradePrice = parseFloat(String(trade.price));
+
+    // Filter by probability (price = probability on Polymarket)
+    if (tradePrice < config.minProbability) {
+      console.log(`[Filter] Skipped ${wallet.alias}'s trade: ${trade.outcome} @ $${trade.price} (${(tradePrice * 100).toFixed(1)}% < ${config.minProbability * 100}% min)`);
+      return;
+    }
+    if (tradePrice > config.maxProbability) {
+      console.log(`[Filter] Skipped ${wallet.alias}'s trade: ${trade.outcome} @ $${trade.price} (${(tradePrice * 100).toFixed(1)}% > ${config.maxProbability * 100}% max)`);
+      return;
+    }
+
     console.log('\n' + '='.repeat(50));
     console.log(`🚨 NEW TRADE SIGNAL from ${wallet.alias}`);
     console.log('='.repeat(50));
 
-    const trade = signal.trade;
     const tradeTime = new Date(trade.timestamp * 1000);
     const delay = Date.now() - tradeTime.getTime();
 
@@ -58,7 +70,7 @@ async function main() {
     console.log(`Outcome: ${trade.outcome}`);
     console.log(`Side: ${trade.side}`);
     console.log(`Size: ${trade.size} shares`);
-    console.log(`Price: $${trade.price}`);
+    console.log(`Price: $${trade.price} (${(tradePrice * 100).toFixed(1)}% probability)`);
 
     // Calculate position size
     try {
@@ -130,6 +142,7 @@ async function main() {
   console.log('\n✅ Bot is running!');
   console.log(`Tracking: ${config.wallets.filter(w => w.enabled).map(w => w.alias).join(', ')}`);
   console.log(`Your account: $${config.userAccountSize} | Max per trade: $${config.maxPositionSize}`);
+  console.log(`Probability filter: ${config.minProbability * 100}% - ${config.maxProbability * 100}%`);
   console.log(`Polling: every ${config.pollingIntervalMs / 1000}s`);
   console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
 }

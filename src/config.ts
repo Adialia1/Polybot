@@ -20,6 +20,8 @@ export const defaultConfig: CopyConfig = {
   minTradeSize: 5, // Minimum $5 trade size
   userAccountSize: 1000, // Your account size in USD
   maxPercentagePerTrade: 10, // Max 10% of your account per trade
+  minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
+  maxProbability: 0.95, // Skip trades with >95% probability (low upside)
 };
 
 export function loadConfig(): CopyConfig {
@@ -71,6 +73,14 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.MAX_PERCENTAGE_PER_TRADE) {
     config.maxPercentagePerTrade = parseFloat(process.env.MAX_PERCENTAGE_PER_TRADE);
+  }
+
+  if (process.env.MIN_PROBABILITY) {
+    config.minProbability = parseFloat(process.env.MIN_PROBABILITY);
+  }
+
+  if (process.env.MAX_PROBABILITY) {
+    config.maxProbability = parseFloat(process.env.MAX_PROBABILITY);
   }
 
   return config;

@@ -89,4 +89,7 @@ export interface CopyConfig {
   minTradeSize: number;
   userAccountSize: number;
   maxPercentagePerTrade: number;
+  // Probability filters (price = probability on Polymarket)
+  minProbability: number; // Skip trades below this (e.g., 0.05 = 5%)
+  maxProbability: number; // Skip trades above this (e.g., 0.95 = 95%)
 }
