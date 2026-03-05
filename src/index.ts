@@ -39,10 +39,20 @@ async function main() {
       return;
     }
 
+    // Load API credentials from env if available
+    const apiCredentials = process.env.POLY_API_KEY && process.env.POLY_API_SECRET && process.env.POLY_PASSPHRASE
+      ? {
+          key: process.env.POLY_API_KEY,
+          secret: process.env.POLY_API_SECRET,
+          passphrase: process.env.POLY_PASSPHRASE,
+        }
+      : undefined;
+
     trader = new Trader({
       privateKey: config.privateKey,
       funderAddress: config.funderAddress,
       dryRun: config.dryRun,
+      apiCredentials,
     });
 
     try {
@@ -202,7 +212,76 @@ async function main() {
 // CLI commands for testing
 const args = process.argv.slice(2);
 
-if (args[0] === 'positions' && args[1]) {
+if (args[0] === 'check-balance') {
+  const { OnchainClient } = await import('./api/onchain.js');
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const { createPublicClient, http, formatUnits } = await import('viem');
+  const { polygon } = await import('viem/chains');
+  const onchain = new OnchainClient();
+  const config = loadConfig();
+
+  let walletAddress: string;
+  if (config.privateKey) {
+    const account = privateKeyToAccount(config.privateKey as `0x${string}`);
+    walletAddress = account.address;
+  } else {
+    console.error('No PRIVATE_KEY configured');
+    process.exit(1);
+  }
+
+  console.log('Checking wallet:', walletAddress);
+  console.log('');
+
+  const client = createPublicClient({
+    chain: polygon,
+    transport: http('https://polygon.drpc.org'),
+  });
+
+  const ERC20_ABI = [{
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ type: 'uint256' }]
+  }];
+
+  // Check all relevant tokens
+  const tokens = [
+    { name: 'USDC.e (bridged)', address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', decimals: 6 },
+    { name: 'USDC (native)', address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
+    { name: 'USDT', address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
+  ];
+
+  let totalStable = 0;
+  for (const token of tokens) {
+    const balance = await client.readContract({
+      address: token.address as `0x${string}`,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [walletAddress],
+    });
+    const formatted = parseFloat(formatUnits(balance as bigint, token.decimals));
+    totalStable += formatted;
+    console.log(`${token.name}: $${formatted.toFixed(2)}`);
+  }
+
+  // MATIC for gas
+  const maticBalance = await client.getBalance({ address: walletAddress as `0x${string}` });
+  const maticFormatted = parseFloat(formatUnits(maticBalance, 18));
+  console.log(`MATIC (gas): ${maticFormatted.toFixed(4)} MATIC`);
+
+  console.log('');
+  if (totalStable > 0) {
+    console.log(`✅ Wallet has $${totalStable.toFixed(2)} in stablecoins`);
+    if (maticFormatted < 0.01) {
+      console.log('⚠️  Low MATIC - you may need gas for transactions');
+    }
+  } else {
+    console.log('⚠️  Wallet has no stablecoins - please fund it on Polygon');
+    console.log('\nNote: Bridge transactions can take 10-30 minutes to complete.');
+    console.log('Check your transaction at: https://polygonscan.com/address/' + walletAddress);
+  }
+} else if (args[0] === 'positions' && args[1]) {
   const { DataApiClient } = await import('./api/dataApi.js');
   const dataApi = new DataApiClient();
   console.log(`Fetching positions for ${args[1]}...`);

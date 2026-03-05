@@ -8,18 +8,13 @@ export const defaultConfig: CopyConfig = {
       alias: 'RN1',
       enabled: true,
     },
-    {
-      address: '0x6480542954b70a674a74bd1a6015dec362dc8dc5',
-      alias: 'tripping',
-      enabled: true,
-    },
   ],
   pollingIntervalMs: 1000, // Poll every 1 second
   copyDelayMs: 500, // Delay before copying trade
-  maxPositionSize: 100, // Max $100 per position
-  minTradeSize: 5, // Minimum $5 trade size
-  userAccountSize: 1000, // Your account size in USD
-  maxPercentagePerTrade: 10, // Max 10% of your account per trade
+  maxPositionSize: 10, // Max $10 per position (for $30 account)
+  minTradeSize: 1, // Minimum $1 trade size
+  userAccountSize: 30, // Your account size in USD
+  maxPercentagePerTrade: 20, // Max 20% of your account per trade ($6 max)
   minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
   maxProbability: 0.95, // Skip trades with >95% probability (low upside)
   // Trading settings

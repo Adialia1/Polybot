@@ -8,7 +8,15 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "positions": "tsx src/index.ts positions",
-    "trades": "tsx src/index.ts trades"
+    "trades": "tsx src/index.ts trades",
+    "check-balance": "tsx src/index.ts check-balance",
+    "find-market": "tsx src/scripts/findMarket.ts",
+    "test-trade": "tsx src/scripts/testTrade.ts",
+    "approve": "tsx src/scripts/approve.ts",
+    "quick-test": "tsx src/scripts/quickTest.ts",
+    "sell": "tsx src/scripts/sellPosition.ts",
+    "bot": "tsx src/bot.ts",
+    "status": "tsx src/scripts/status.ts"
   },
   "keywords": [
     "polymarket",
@@ -21,6 +29,8 @@
   "description": "Polymarket trade copier bot",
   "dependencies": {
     "@polymarket/clob-client": "5.7.0",
+    "@scure/bip32": "2.0.1",
+    "@scure/bip39": "2.0.1",
     "@types/node": "25.3.3",
     "axios": "1.13.6",
     "dotenv": "17.3.1",

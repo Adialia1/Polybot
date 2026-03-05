@@ -9,6 +9,11 @@ export interface TraderConfig {
   privateKey: string;
   funderAddress?: string; // Proxy wallet address (if different from signer)
   dryRun?: boolean; // If true, don't actually execute trades
+  apiCredentials?: {
+    key: string;
+    secret: string;
+    passphrase: string;
+  };
 }
 
 export interface TradeResult {
@@ -25,6 +30,7 @@ export interface TradeResult {
 
 const CLOB_HOST = 'https://clob.polymarket.com';
 const CHAIN_ID = 137; // Polygon
+const SIGNATURE_TYPE = 2; // GNOSIS_SAFE for browser wallet / proxy wallet users
 
 export class Trader {
   private client: ClobClient | null = null;
@@ -47,6 +53,10 @@ export class Trader {
     try {
       // Create viem account from private key
       const account = privateKeyToAccount(this.config.privateKey as `0x${string}`);
+      const funderAddress = this.config.funderAddress || account.address;
+
+      console.log('[Trader] Signer:', account.address);
+      console.log('[Trader] Funder (proxy):', funderAddress);
 
       // Create wallet client (required by ClobClient)
       const walletClient = createWalletClient({
@@ -55,28 +65,35 @@ export class Trader {
         transport: http('https://polygon.drpc.org'),
       });
 
-      // Create CLOB client with signer
-      this.client = new ClobClient(
-        CLOB_HOST,
-        CHAIN_ID,
-        walletClient,
-        undefined, // creds - will be derived
-        undefined, // signatureType - default
-        this.config.funderAddress || account.address, // funder address
-      );
+      // Use provided API credentials or derive them
+      let creds = this.config.apiCredentials;
 
-      // Derive API credentials
-      const creds = await this.client.createOrDeriveApiKey();
-      console.log('[Trader] API credentials derived successfully');
+      if (!creds) {
+        // Create CLOB client to derive credentials
+        const tempClient = new ClobClient(
+          CLOB_HOST,
+          CHAIN_ID,
+          walletClient,
+          undefined,
+          SIGNATURE_TYPE,
+          funderAddress,
+        );
 
-      // Reinitialize with credentials
+        // Derive API credentials
+        creds = await tempClient.createOrDeriveApiKey();
+        console.log('[Trader] API credentials derived successfully');
+      } else {
+        console.log('[Trader] Using provided API credentials');
+      }
+
+      // Initialize client with credentials
       this.client = new ClobClient(
         CLOB_HOST,
         CHAIN_ID,
         walletClient,
         creds,
-        undefined,
-        this.config.funderAddress || account.address,
+        SIGNATURE_TYPE,
+        funderAddress,
       );
 
       this.isInitialized = true;
