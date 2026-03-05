@@ -4,6 +4,7 @@ import { PositionSizer } from './services/positionSizer.js';
 import { PositionManager } from './services/positionManager.js';
 import { OrderQueue, QueuedOrder } from './services/orderQueue.js';
 import { StateManager } from './services/stateManager.js';
+import { PositionReconciler } from './services/positionReconciler.js';
 import { Trader } from './services/trader.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
@@ -16,6 +17,8 @@ export class CopyTradingBot {
   private positionManager: PositionManager | null = null;
   private orderQueue: OrderQueue;
   private stateManager: StateManager;
+  private reconciler: PositionReconciler | null = null;
+  private reconcileInterval: NodeJS.Timeout | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
   private isRunning = false;
@@ -111,6 +114,39 @@ export class CopyTradingBot {
         console.error('Failed to initialize trader:', err);
         return;
       }
+
+      // Initialize reconciler
+      this.reconciler = new PositionReconciler({
+        stateManager: this.stateManager,
+        trader: this.trader,
+        trackedWallets: this.config.wallets,
+        dryRun: this.config.dryRun,
+      });
+
+      // Run position reconciliation on startup
+      // This detects if traders sold while we were offline
+      if (this.stateManager.getAllPositions().length > 0) {
+        console.log('\n🔄 Running position reconciliation...');
+        try {
+          await this.reconciler.reconcile();
+        } catch (err) {
+          console.error('Reconciliation failed:', err);
+          // Continue anyway - don't block startup
+        }
+      }
+
+      // Start periodic reconciliation (every hour)
+      this.reconcileInterval = setInterval(async () => {
+        if (this.stateManager.getAllPositions().length > 0) {
+          console.log('\n🔄 Running periodic reconciliation...');
+          try {
+            await this.reconciler!.reconcile();
+          } catch (err) {
+            console.error('Periodic reconciliation failed:', err);
+          }
+        }
+      }, 60 * 60 * 1000); // Every hour
+      console.log('[Reconciler] Periodic check enabled (every 1h)');
     }
 
     // Initialize trade monitor
@@ -364,6 +400,10 @@ export class CopyTradingBot {
 
     if (this.positionManager) {
       this.positionManager.stop();
+    }
+
+    if (this.reconcileInterval) {
+      clearInterval(this.reconcileInterval);
     }
 
     // Save state before exit
