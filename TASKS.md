@@ -31,16 +31,16 @@
 
 ## Medium Priority
 
-### 6. Performance Tracking per Trader
-- [ ] Track P&L per trader in StateManager
-- [ ] Track win rate per trader
-- [ ] Track average hold time
-- [ ] Add to status command output
+### 6. Performance Tracking per Trader ✅
+- [x] Track P&L per trader in StateManager
+- [x] Track win rate per trader
+- [x] Track average hold time
+- [x] Add to status command output
 
-### 7. Trailing Stop Loss
-- [ ] Track highest price reached for each position
-- [ ] Sell if price drops X% from peak (e.g., 15%)
-- [ ] More sophisticated than fixed stop loss
+### 7. Trailing Stop Loss ✅
+- [x] Track highest price reached for each position
+- [x] Sell if price drops X% from peak (e.g., 15%)
+- [x] More sophisticated than fixed stop loss
 
 ### 8. Max Open Positions Limit ✅
 - [x] Config: MAX_OPEN_POSITIONS (e.g., 10)
@@ -52,10 +52,10 @@
 - [ ] Options: follow majority, follow highest allocation trader, skip conflicting trades
 - [ ] Config: CONFLICT_STRATEGY
 
-### 10. Health Check Endpoint
-- [ ] Simple HTTP server on configurable port
-- [ ] /health returns bot status, positions count, last trade time
-- [ ] Useful for monitoring with uptime services
+### 10. Health Check Endpoint ✅
+- [x] Simple HTTP server on configurable port
+- [x] /health returns bot status, positions count, last trade time
+- [x] Useful for monitoring with uptime services
 
 ## Lower Priority
 
@@ -95,10 +95,10 @@
 - [x] 3. Per-Trader Allocation
 - [x] 8. Max Open Positions
 
-### Batch 3
-- [ ] 6. Performance Tracking
-- [ ] 7. Trailing Stop Loss
-- [ ] 10. Health Check Endpoint
+### Batch 3 ✅ DONE
+- [x] 6. Performance Tracking
+- [x] 7. Trailing Stop Loss
+- [x] 10. Health Check Endpoint
 
 ### Batch 4
 - [ ] 9. Conflict Resolution

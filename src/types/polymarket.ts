@@ -107,4 +107,10 @@ export interface CopyConfig {
   retryDelayMs: number; // Base delay between retries in ms (default: 2000)
   // Daily loss limit
   dailyLossLimit: number; // Max daily loss in USD (e.g., 10 = stop if down $10, 0 = disabled)
+  // Trailing stop loss
+  trailingStopPercent: number; // Sell if price drops X% from peak (0 = disabled)
+  trailingStopCheckIntervalMs: number; // Check interval in ms
+  // Health check server
+  healthCheckEnabled: boolean; // Enable HTTP health check server
+  healthCheckPort: number; // Port for health check server (default: 3000)
 }

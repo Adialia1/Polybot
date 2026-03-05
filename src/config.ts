@@ -30,6 +30,12 @@ export const defaultConfig: CopyConfig = {
   retryDelayMs: 2000, // Base delay between retries (uses exponential backoff)
   // Daily loss limit
   dailyLossLimit: 0, // Max daily loss in USD (0 = disabled)
+  // Trailing stop loss
+  trailingStopPercent: 15, // Sell if price drops 15% from peak (0 = disabled)
+  trailingStopCheckIntervalMs: 60000, // Check every 60 seconds
+  // Health check server
+  healthCheckEnabled: false, // Enable HTTP health check server (set via HEALTH_CHECK_ENABLED)
+  healthCheckPort: 3000, // Port for health check server (set via HEALTH_CHECK_PORT)
 };
 
 export function loadConfig(): CopyConfig {
@@ -133,6 +139,25 @@ export function loadConfig(): CopyConfig {
   // Max open positions (0 = unlimited)
   if (process.env.MAX_OPEN_POSITIONS) {
     config.maxOpenPositions = parseInt(process.env.MAX_OPEN_POSITIONS, 10);
+  }
+
+  // Trailing stop loss (0 = disabled)
+  if (process.env.TRAILING_STOP_PERCENT) {
+    config.trailingStopPercent = parseFloat(process.env.TRAILING_STOP_PERCENT);
+  }
+
+  // Trailing stop check interval
+  if (process.env.TRAILING_STOP_CHECK_INTERVAL_MS) {
+    config.trailingStopCheckIntervalMs = parseInt(process.env.TRAILING_STOP_CHECK_INTERVAL_MS, 10);
+  }
+
+  // Health check server
+  if (process.env.HEALTH_CHECK_ENABLED === 'true') {
+    config.healthCheckEnabled = true;
+  }
+
+  if (process.env.HEALTH_CHECK_PORT) {
+    config.healthCheckPort = parseInt(process.env.HEALTH_CHECK_PORT, 10);
   }
 
   return config;

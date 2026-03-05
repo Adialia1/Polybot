@@ -2,6 +2,15 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+export interface TraderStats {
+  totalPnL: number;
+  totalTrades: number;
+  wins: number; // trades with profit > 0
+  losses: number;
+  avgHoldTimeMs: number;
+  totalHoldTimeMs: number; // used for calculating average
+}
+
 export interface BotState {
   // Positions we're tracking locally
   positions: {
@@ -13,6 +22,8 @@ export interface BotState {
       outcome: string;
       slug: string;
       entryTime: number;
+      walletAlias?: string; // Track which trader opened this position
+      highestPrice?: number; // Highest price reached for trailing stop
     };
   };
 
@@ -44,6 +55,11 @@ export interface BotState {
     lastUpdateTime: number;
   };
 
+  // Per-trader performance tracking
+  traderStats: {
+    [walletAlias: string]: TraderStats;
+  };
+
   // Daily P&L tracking
   dailyPnL: number; // Cumulative P&L for the current day (in USD)
   dailyPnLDate: string; // Date in YYYY-MM-DD format (UTC)
@@ -52,7 +68,7 @@ export interface BotState {
   version: number;
 }
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_STATE_PATH = join(__dirname, '../../data/state.json');
 
@@ -88,6 +104,7 @@ export class StateManager {
         startTime: Date.now(),
         lastUpdateTime: Date.now(),
       },
+      traderStats: {},
       dailyPnL: 0,
       dailyPnLDate: this.getCurrentUTCDate(),
       version: STATE_VERSION,
@@ -110,6 +127,11 @@ export class StateManager {
           }
           if (!state.dailyPnLDate) {
             state.dailyPnLDate = this.getCurrentUTCDate();
+          }
+
+          // Migration from v2 to v3: Add per-trader stats
+          if (!state.traderStats) {
+            state.traderStats = {};
           }
 
           state.version = STATE_VERSION;
@@ -386,5 +408,173 @@ export class StateManager {
    */
   getDailyPnLDate(): string {
     return this.state.dailyPnLDate;
+  }
+
+  // ============================================
+  // Trailing Stop Loss methods
+  // ============================================
+
+  /**
+   * Update the highest price reached for a position (for trailing stop)
+   * Only updates if currentPrice > existing highestPrice and currentPrice > avgPrice
+   * @param asset - The asset token ID
+   * @param currentPrice - The current market price
+   * @returns true if highestPrice was updated, false otherwise
+   */
+  updateHighestPrice(asset: string, currentPrice: number): boolean {
+    const position = this.state.positions[asset];
+    if (!position) return false;
+
+    // Only track highest price if position is in profit (currentPrice > avgPrice)
+    if (currentPrice <= position.avgPrice) {
+      return false;
+    }
+
+    const existingHighest = position.highestPrice || position.avgPrice;
+    if (currentPrice > existingHighest) {
+      position.highestPrice = currentPrice;
+      this.isDirty = true;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Check if trailing stop should be triggered for a position
+   * @param asset - The asset token ID
+   * @param currentPrice - The current market price
+   * @param trailingStopPercent - The trailing stop percentage (e.g., 15 = sell if price drops 15% from peak)
+   * @returns Object with triggered status and details
+   */
+  checkTrailingStop(
+    asset: string,
+    currentPrice: number,
+    trailingStopPercent: number
+  ): { triggered: boolean; dropPercent?: number; highestPrice?: number; avgPrice?: number } {
+    const position = this.state.positions[asset];
+    if (!position) return { triggered: false };
+
+    const highestPrice = position.highestPrice;
+
+    // Only trigger if we have a highestPrice set AND position has gained value
+    // (highestPrice is only set when price exceeds avgPrice)
+    if (!highestPrice || highestPrice <= position.avgPrice) {
+      return { triggered: false };
+    }
+
+    // Calculate drop from peak
+    const dropPercent = ((highestPrice - currentPrice) / highestPrice) * 100;
+
+    // Trigger if price dropped more than threshold from the peak
+    if (dropPercent >= trailingStopPercent) {
+      return {
+        triggered: true,
+        dropPercent,
+        highestPrice,
+        avgPrice: position.avgPrice,
+      };
+    }
+
+    return {
+      triggered: false,
+      dropPercent,
+      highestPrice,
+      avgPrice: position.avgPrice,
+    };
+  }
+
+  /**
+   * Get the highest price for a position
+   * @param asset - The asset token ID
+   * @returns The highest price, or undefined if not tracked
+   */
+  getHighestPrice(asset: string): number | undefined {
+    return this.state.positions[asset]?.highestPrice;
+  }
+
+  // ============================================
+  // Per-Trader Performance Tracking
+  // ============================================
+
+  /**
+   * Record a completed trade for a specific trader
+   * @param walletAlias - The trader's wallet alias
+   * @param pnl - The P&L from the trade (positive = profit, negative = loss)
+   * @param holdTimeMs - How long the position was held in milliseconds
+   */
+  recordTraderTrade(walletAlias: string, pnl: number, holdTimeMs: number): void {
+    if (!this.state.traderStats[walletAlias]) {
+      this.state.traderStats[walletAlias] = {
+        totalPnL: 0,
+        totalTrades: 0,
+        wins: 0,
+        losses: 0,
+        avgHoldTimeMs: 0,
+        totalHoldTimeMs: 0,
+      };
+    }
+
+    const stats = this.state.traderStats[walletAlias];
+    stats.totalPnL += pnl;
+    stats.totalTrades++;
+    stats.totalHoldTimeMs += holdTimeMs;
+    stats.avgHoldTimeMs = stats.totalHoldTimeMs / stats.totalTrades;
+
+    if (pnl > 0) {
+      stats.wins++;
+    } else if (pnl < 0) {
+      stats.losses++;
+    }
+    // pnl === 0 is neither a win nor a loss
+
+    this.isDirty = true;
+
+    const winRate = stats.totalTrades > 0 ? (stats.wins / stats.totalTrades * 100).toFixed(1) : '0.0';
+    console.log(`[StateManager] Trader ${walletAlias} trade recorded: P&L ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} | Total P&L: $${stats.totalPnL.toFixed(2)} | Win Rate: ${winRate}%`);
+  }
+
+  /**
+   * Get stats for a specific trader
+   * @param walletAlias - The trader's wallet alias
+   * @returns The trader's stats or undefined if not found
+   */
+  getTraderStats(walletAlias: string): TraderStats | undefined {
+    return this.state.traderStats[walletAlias];
+  }
+
+  /**
+   * Get stats for all traders
+   * @returns Object with all trader stats keyed by wallet alias
+   */
+  getAllTraderStats(): { [walletAlias: string]: TraderStats } {
+    return { ...this.state.traderStats };
+  }
+
+  /**
+   * Format hold time in human-readable format
+   * @param holdTimeMs - Hold time in milliseconds
+   * @returns Formatted string (e.g., "2h 15m" or "45m")
+   */
+  static formatHoldTime(holdTimeMs: number): string {
+    const totalMinutes = Math.floor(holdTimeMs / (1000 * 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+  }
+
+  /**
+   * Set the wallet alias for a position (used when opening new positions)
+   * @param asset - The asset ID
+   * @param walletAlias - The trader's wallet alias
+   */
+  setPositionWalletAlias(asset: string, walletAlias: string): void {
+    if (this.state.positions[asset]) {
+      this.state.positions[asset].walletAlias = walletAlias;
+      this.isDirty = true;
+    }
   }
 }

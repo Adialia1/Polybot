@@ -6,8 +6,10 @@ import { OrderQueue, QueuedOrder } from './services/orderQueue.js';
 import { StateManager } from './services/stateManager.js';
 import { PositionReconciler } from './services/positionReconciler.js';
 import { RiskManager } from './services/riskManager.js';
+import { TrailingStopMonitor } from './services/trailingStopMonitor.js';
 import { Trader } from './services/trader.js';
 import { TelegramNotifier } from './services/notifier.js';
+import { HealthCheckServer } from './services/healthCheck.js';
 import { isMarketBlacklisted } from './services/tradeFilter.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
@@ -23,9 +25,11 @@ export class CopyTradingBot {
   private reconciler: PositionReconciler | null = null;
   private reconcileInterval: NodeJS.Timeout | null = null;
   private riskManager: RiskManager | null = null;
+  private trailingStopMonitor: TrailingStopMonitor | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
   private notifier: TelegramNotifier;
+  private healthCheckServer: HealthCheckServer | null = null;
   private isRunning = false;
 
   constructor() {
@@ -175,6 +179,21 @@ export class CopyTradingBot {
         this.notifier
       );
       this.riskManager.startMonitoring();
+
+      // Initialize trailing stop monitor (if enabled via config)
+      if (this.config.trailingStopPercent > 0) {
+        this.trailingStopMonitor = new TrailingStopMonitor(
+          {
+            trailingStopPercent: this.config.trailingStopPercent,
+            checkIntervalMs: this.config.trailingStopCheckIntervalMs,
+          },
+          this.stateManager,
+          this.trader,
+          this.config.dryRun,
+          this.notifier
+        );
+        this.trailingStopMonitor.startMonitoring();
+      }
     }
 
     // Initialize trade monitor
@@ -211,6 +230,22 @@ export class CopyTradingBot {
       tradingEnabled: this.config.enableTrading,
       positionCount: this.positionManager?.getPositions().length || 0,
     });
+
+    // Start health check server if enabled
+    if (this.config.healthCheckEnabled) {
+      this.healthCheckServer = new HealthCheckServer({
+        port: this.config.healthCheckPort,
+        stateManager: this.stateManager,
+        orderQueue: this.orderQueue,
+      });
+
+      try {
+        await this.healthCheckServer.start();
+      } catch (err) {
+        console.error('[HealthCheck] Failed to start server:', err);
+        // Continue anyway - health check is optional
+      }
+    }
 
     console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
   }
@@ -406,6 +441,19 @@ export class CopyTradingBot {
           console.log(`  Order ID: ${result.orderId}`);
         }
 
+        // For SELL orders, capture position info before updating (for trader stats and daily P&L)
+        let positionBeforeSell: { avgPrice: number; entryTime: number; walletAlias?: string } | null = null;
+        if (order.trade.side === 'SELL') {
+          const existingPosition = this.stateManager.getPosition(order.trade.asset);
+          if (existingPosition) {
+            positionBeforeSell = {
+              avgPrice: existingPosition.avgPrice,
+              entryTime: existingPosition.entryTime,
+              walletAlias: existingPosition.walletAlias,
+            };
+          }
+        }
+
         // Update position in state manager
         if (result.details) {
           const sizeDelta = order.trade.side === 'BUY'
@@ -421,6 +469,23 @@ export class CopyTradingBot {
               outcome: order.trade.outcome,
             }
           );
+
+          // For BUY orders on new positions, set the wallet alias
+          if (order.trade.side === 'BUY') {
+            this.stateManager.setPositionWalletAlias(order.trade.asset, order.walletAlias);
+          }
+
+          // For SELL orders, record trader stats
+          if (order.trade.side === 'SELL' && positionBeforeSell) {
+            const sellPrice = result.details.price;
+            const sharesSold = result.details.size;
+            const pnl = (sellPrice - positionBeforeSell.avgPrice) * sharesSold;
+            const holdTimeMs = Date.now() - positionBeforeSell.entryTime;
+
+            // Use the wallet alias from the position (who opened it) or the current order's alias as fallback
+            const traderAlias = positionBeforeSell.walletAlias || order.walletAlias;
+            this.stateManager.recordTraderTrade(traderAlias, pnl, holdTimeMs);
+          }
 
           // Also update position manager if available
           if (this.positionManager) {
@@ -457,8 +522,9 @@ export class CopyTradingBot {
           } else {
             // When selling, calculate realized P&L
             // P&L = (sell price - avg entry price) * shares sold
-            const position = this.stateManager.getPosition(order.trade.asset);
-            const avgPrice = position?.avgPrice || parseFloat(String(order.trade.price));
+            // Note: Position may already be deleted by updatePosition if fully closed
+            // so we use positionBeforeSell which was captured earlier
+            const avgPrice = positionBeforeSell?.avgPrice || parseFloat(String(order.trade.price));
             const sellPrice = result.details.price;
             const sharesSold = result.details.size;
             pnlChange = (sellPrice - avgPrice) * sharesSold;
@@ -467,6 +533,11 @@ export class CopyTradingBot {
         }
 
         this.orderQueue.completeOrder(order.id, result);
+
+        // Update health check last trade time
+        if (this.healthCheckServer) {
+          this.healthCheckServer.updateLastTradeTime();
+        }
 
         // Send Telegram notification for successful trade
         await this.notifier.notifyTradeExecuted({
@@ -571,6 +642,13 @@ export class CopyTradingBot {
     } else {
       console.log(`Daily P&L (${dailyPnLDate}): $${dailyPnL.toFixed(2)} (no limit)`);
     }
+
+    // Show trailing stop status
+    if (this.config.trailingStopPercent > 0) {
+      console.log(`Trailing Stop: ${this.config.trailingStopPercent}% from peak (check every ${this.config.trailingStopCheckIntervalMs / 1000}s)`);
+    } else {
+      console.log(`Trailing Stop: disabled`);
+    }
   }
 
   async stop(): Promise<void> {
@@ -593,6 +671,15 @@ export class CopyTradingBot {
 
     if (this.riskManager) {
       this.riskManager.stopMonitoring();
+    }
+
+    if (this.trailingStopMonitor) {
+      this.trailingStopMonitor.stopMonitoring();
+    }
+
+    // Stop health check server
+    if (this.healthCheckServer) {
+      await this.healthCheckServer.stop();
     }
 
     // Send Telegram notification that bot stopped
