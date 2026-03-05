@@ -17,11 +17,15 @@ export const defaultConfig: CopyConfig = {
   maxPercentagePerTrade: 20, // Max 20% of your account per trade ($6 max)
   minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
   maxProbability: 0.95, // Skip trades with >95% probability (low upside)
+  blacklistKeywords: [], // Keywords to block (set via BLACKLIST_KEYWORDS env var)
   // Trading settings
   enableTrading: false, // Disabled by default - set to true to execute trades
   dryRun: true, // Simulate trades without executing (safe mode)
   privateKey: undefined, // Set via PRIVATE_KEY env var
   funderAddress: undefined, // Set via FUNDER_ADDRESS env var (optional)
+  // Retry settings
+  maxRetries: 3, // Max retry attempts for failed orders
+  retryDelayMs: 2000, // Base delay between retries (uses exponential backoff)
 };
 
 export function loadConfig(): CopyConfig {
@@ -83,6 +87,14 @@ export function loadConfig(): CopyConfig {
     config.maxProbability = parseFloat(process.env.MAX_PROBABILITY);
   }
 
+  // Blacklist keywords (comma-separated)
+  if (process.env.BLACKLIST_KEYWORDS) {
+    config.blacklistKeywords = process.env.BLACKLIST_KEYWORDS
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
+  }
+
   // Trading settings
   if (process.env.ENABLE_TRADING === 'true') {
     config.enableTrading = true;
@@ -98,6 +110,15 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.FUNDER_ADDRESS) {
     config.funderAddress = process.env.FUNDER_ADDRESS;
+  }
+
+  // Retry settings
+  if (process.env.MAX_RETRIES) {
+    config.maxRetries = parseInt(process.env.MAX_RETRIES, 10);
+  }
+
+  if (process.env.RETRY_DELAY_MS) {
+    config.retryDelayMs = parseInt(process.env.RETRY_DELAY_MS, 10);
   }
 
   return config;

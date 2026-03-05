@@ -7,6 +7,8 @@ import { StateManager } from './services/stateManager.js';
 import { PositionReconciler } from './services/positionReconciler.js';
 import { RiskManager } from './services/riskManager.js';
 import { Trader } from './services/trader.js';
+import { TelegramNotifier } from './services/notifier.js';
+import { isMarketBlacklisted } from './services/tradeFilter.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
 import { TradeSignal, WalletConfig, Trade } from './types/index.js';
@@ -23,10 +25,14 @@ export class CopyTradingBot {
   private riskManager: RiskManager | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
+  private notifier: TelegramNotifier;
   private isRunning = false;
 
   constructor() {
     this.clobApi = new ClobApiClient();
+
+    // Initialize Telegram notifier
+    this.notifier = new TelegramNotifier();
 
     // Initialize state manager (loads persisted state)
     this.stateManager = new StateManager();
@@ -160,7 +166,8 @@ export class CopyTradingBot {
         },
         this.stateManager,
         this.trader,
-        this.config.dryRun
+        this.config.dryRun,
+        this.notifier
       );
       this.riskManager.startMonitoring();
     }
@@ -190,6 +197,16 @@ export class CopyTradingBot {
     this.isRunning = true;
     this.printStatus();
 
+    // Send Telegram notification that bot started
+    await this.notifier.notifyBotStarted({
+      wallets: this.config.wallets.filter(w => w.enabled).map(w => w.alias),
+      accountSize: this.config.userAccountSize,
+      maxPositionSize: this.config.maxPositionSize,
+      dryRun: this.config.dryRun,
+      tradingEnabled: this.config.enableTrading,
+      positionCount: this.positionManager?.getPositions().length || 0,
+    });
+
     console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
   }
 
@@ -204,6 +221,12 @@ export class CopyTradingBot {
     }
     if (tradePrice > this.config.maxProbability) {
       console.log(`[Filter] Skipped ${wallet.alias}'s trade: ${trade.outcome} @ $${trade.price} (prob too high)`);
+      return;
+    }
+
+    // Filter by market blacklist
+    if (isMarketBlacklisted(trade.title, this.config.blacklistKeywords)) {
+      console.log(`[Blacklist] Skipped ${wallet.alias}'s trade on "${trade.title}" (market blacklisted)`);
       return;
     }
 
@@ -300,36 +323,48 @@ export class CopyTradingBot {
     console.log('='.repeat(50) + '\n');
   }
 
+  /**
+   * Delay helper for retry logic
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   private async executeOrder(order: QueuedOrder): Promise<void> {
     if (!this.trader) {
       this.orderQueue.failOrder(order.id, 'Trader not initialized');
       return;
     }
 
-    console.log(`\n🔄 Executing order: ${order.id}`);
+    const retryCount = order.retryCount || 0;
+    const isRetry = retryCount > 0;
+
+    console.log(`\n🔄 Executing order: ${order.id}${isRetry ? ` (retry ${retryCount}/${this.config.maxRetries})` : ''}`);
     console.log(`  ${order.trade.side} $${order.amount.toFixed(2)} on ${order.trade.outcome}`);
 
-    // Record order in state
-    this.stateManager.addOrder({
-      id: order.id,
-      asset: order.trade.asset,
-      side: order.trade.side as 'BUY' | 'SELL',
-      amount: order.amount,
-      status: 'processing',
-      createdAt: order.createdAt,
-      walletAlias: order.walletAlias,
-    });
+    // Record order in state (only on first attempt)
+    if (!isRetry) {
+      this.stateManager.addOrder({
+        id: order.id,
+        asset: order.trade.asset,
+        side: order.trade.side as 'BUY' | 'SELL',
+        amount: order.amount,
+        status: 'processing',
+        createdAt: order.createdAt,
+        walletAlias: order.walletAlias,
+      });
+    }
 
-    // Add delay if configured
-    if (this.config.copyDelayMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, this.config.copyDelayMs));
+    // Add delay if configured (only on first attempt)
+    if (!isRetry && this.config.copyDelayMs > 0) {
+      await this.delay(this.config.copyDelayMs);
     }
 
     try {
       const result = await this.trader.copyTrade(order.trade, order.amount);
 
       if (result.success) {
-        console.log(`\n✅ Trade ${this.config.dryRun ? 'SIMULATED' : 'EXECUTED'} successfully!`);
+        console.log(`\n✅ Trade ${this.config.dryRun ? 'SIMULATED' : 'EXECUTED'} successfully!${isRetry ? ` (after ${retryCount} retries)` : ''}`);
         if (result.orderId) {
           console.log(`  Order ID: ${result.orderId}`);
         }
@@ -373,23 +408,68 @@ export class CopyTradingBot {
         });
 
         this.orderQueue.completeOrder(order.id, result);
-      } else {
-        console.log(`\n❌ Trade failed: ${result.error}`);
-        this.stateManager.recordTrade(false, 0);
-        this.stateManager.updateOrder(order.id, {
-          status: 'failed',
-          processedAt: Date.now(),
+
+        // Send Telegram notification for successful trade
+        await this.notifier.notifyTradeExecuted({
+          side: order.trade.side as 'BUY' | 'SELL',
+          title: order.trade.title,
+          outcome: order.trade.outcome,
+          amount: order.amount,
+          price: result.details?.price || parseFloat(String(order.trade.price)),
+          size: result.details?.size,
+          orderId: result.orderId,
+          walletAlias: order.walletAlias,
         });
-        this.orderQueue.failOrder(order.id, result.error || 'Unknown error');
+      } else {
+        // Trade failed - check if we should retry
+        await this.handleOrderFailure(order, result.error || 'Unknown error');
       }
     } catch (err: any) {
-      console.log(`\n❌ Trade error: ${err?.message || err}`);
+      // Exception occurred - check if we should retry
+      await this.handleOrderFailure(order, err?.message || 'Unknown error');
+    }
+  }
+
+  /**
+   * Handle order failure with retry logic using exponential backoff
+   */
+  private async handleOrderFailure(order: QueuedOrder, errorMessage: string): Promise<void> {
+    const currentRetryCount = order.retryCount || 0;
+
+    if (currentRetryCount < this.config.maxRetries) {
+      // Calculate exponential backoff delay: baseDelay * attemptNumber
+      const retryDelay = this.config.retryDelayMs * (currentRetryCount + 1);
+
+      console.log(`\n⚠️ Trade failed: ${errorMessage}`);
+      console.log(`  Retrying in ${retryDelay / 1000}s... (attempt ${currentRetryCount + 1}/${this.config.maxRetries})`);
+
+      // Update retry count on the order
+      order.retryCount = currentRetryCount + 1;
+
+      // Wait for exponential backoff delay
+      await this.delay(retryDelay);
+
+      // Retry the order
+      await this.executeOrder(order);
+    } else {
+      // Max retries exceeded - mark as permanently failed
+      console.log(`\n❌ Trade failed after ${currentRetryCount} retries: ${errorMessage}`);
       this.stateManager.recordTrade(false, 0);
       this.stateManager.updateOrder(order.id, {
         status: 'failed',
         processedAt: Date.now(),
       });
-      this.orderQueue.failOrder(order.id, err?.message || 'Unknown error');
+      this.orderQueue.failOrder(order.id, `${errorMessage} (after ${currentRetryCount} retries)`);
+
+      // Send Telegram notification for failed trade (only after all retries exhausted)
+      await this.notifier.notifyTradeFailed({
+        side: order.trade.side as 'BUY' | 'SELL',
+        title: order.trade.title,
+        outcome: order.trade.outcome,
+        amount: order.amount,
+        error: `${errorMessage} (after ${currentRetryCount} retries)`,
+        walletAlias: order.walletAlias,
+      });
     }
   }
 
@@ -399,6 +479,10 @@ export class CopyTradingBot {
     console.log(`Your account: $${this.config.userAccountSize} | Max per trade: $${this.config.maxPositionSize}`);
     console.log(`Probability filter: ${this.config.minProbability * 100}% - ${this.config.maxProbability * 100}%`);
 
+    if (this.config.blacklistKeywords.length > 0) {
+      console.log(`Blacklist: ${this.config.blacklistKeywords.join(', ')}`);
+    }
+
     if (this.config.enableTrading) {
       console.log(`Trading: ${this.config.dryRun ? '🔶 DRY RUN (simulated)' : '🟢 LIVE'}`);
     } else {
@@ -406,6 +490,7 @@ export class CopyTradingBot {
     }
 
     console.log(`Polling: every ${this.config.pollingIntervalMs / 1000}s`);
+    console.log(`Retry: max ${this.config.maxRetries} attempts, ${this.config.retryDelayMs}ms base delay`);
 
     if (this.positionManager) {
       const positions = this.positionManager.getPositions();
@@ -434,6 +519,10 @@ export class CopyTradingBot {
     if (this.riskManager) {
       this.riskManager.stopMonitoring();
     }
+
+    // Send Telegram notification that bot stopped
+    const stats = this.stateManager.getStats();
+    await this.notifier.notifyBotStopped(stats);
 
     // Save state before exit
     this.stateManager.stopAutoSave();

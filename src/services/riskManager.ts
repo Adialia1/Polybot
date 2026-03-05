@@ -1,5 +1,6 @@
 import { StateManager } from './stateManager.js';
 import { Trader } from './trader.js';
+import { TelegramNotifier } from './notifier.js';
 import { ClobApiClient } from '../api/clobApi.js';
 
 export interface RiskConfig {
@@ -28,6 +29,7 @@ export class RiskManager {
   private config: RiskConfig;
   private stateManager: StateManager;
   private trader: Trader | null;
+  private notifier: TelegramNotifier | null;
   private clobApi: ClobApiClient;
   private checkInterval: NodeJS.Timeout | null = null;
   private dryRun: boolean;
@@ -36,7 +38,8 @@ export class RiskManager {
     config: RiskConfig,
     stateManager: StateManager,
     trader: Trader | null,
-    dryRun: boolean = true
+    dryRun: boolean = true,
+    notifier: TelegramNotifier | null = null
   ) {
     this.config = {
       stopLossPercent: config.stopLossPercent ?? -25, // Default: -25%
@@ -47,6 +50,7 @@ export class RiskManager {
     };
     this.stateManager = stateManager;
     this.trader = trader;
+    this.notifier = notifier;
     this.clobApi = new ClobApiClient();
     this.dryRun = dryRun;
   }
@@ -136,7 +140,7 @@ export class RiskManager {
           console.log(`  Entry: $${position.avgPrice.toFixed(3)} → Current: $${currentPrice.toFixed(3)}`);
           console.log(`  P&L: ${pnlPercent.toFixed(1)}% (limit: ${this.config.stopLossPercent}%)`);
 
-          await this.sellPosition(position, 'Stop Loss');
+          await this.sellPosition(position, 'Stop Loss', currentPrice, pnlPercent);
         }
 
         // Check take profit
@@ -146,7 +150,7 @@ export class RiskManager {
           console.log(`  Entry: $${position.avgPrice.toFixed(3)} → Current: $${currentPrice.toFixed(3)}`);
           console.log(`  P&L: +${pnlPercent.toFixed(1)}% (target: +${this.config.takeProfitPercent}%)`);
 
-          await this.sellPosition(position, 'Take Profit');
+          await this.sellPosition(position, 'Take Profit', currentPrice, pnlPercent);
         }
       } catch (error) {
         // Silently continue on error
@@ -156,15 +160,46 @@ export class RiskManager {
 
   private async sellPosition(
     position: { asset: string; size: number; title: string; outcome: string; avgPrice: number },
-    reason: string
+    reason: string,
+    currentPrice: number,
+    pnlPercent: number
   ): Promise<void> {
+    const triggerType = reason === 'Stop Loss' ? 'STOP_LOSS' : 'TAKE_PROFIT';
+
     if (this.dryRun) {
       console.log(`  [DRY RUN] Would sell ${position.size.toFixed(4)} shares`);
+      // Still send notification for dry run
+      if (this.notifier) {
+        await this.notifier.notifyRiskTrigger({
+          type: triggerType as 'STOP_LOSS' | 'TAKE_PROFIT',
+          title: position.title,
+          outcome: position.outcome,
+          entryPrice: position.avgPrice,
+          currentPrice,
+          pnlPercent,
+          size: position.size,
+          success: true,
+          orderId: 'DRY_RUN',
+        });
+      }
       return;
     }
 
     if (!this.trader) {
       console.log(`  [Error] Trader not available`);
+      if (this.notifier) {
+        await this.notifier.notifyRiskTrigger({
+          type: triggerType as 'STOP_LOSS' | 'TAKE_PROFIT',
+          title: position.title,
+          outcome: position.outcome,
+          entryPrice: position.avgPrice,
+          currentPrice,
+          pnlPercent,
+          size: position.size,
+          success: false,
+          error: 'Trader not available',
+        });
+      }
       return;
     }
 
@@ -189,11 +224,56 @@ export class RiskManager {
       if (result.success) {
         console.log(`  ✅ ${reason} executed - Order ID: ${result.orderId}`);
         this.stateManager.updatePosition(position.asset, -position.size, sellPrice);
+
+        // Send success notification
+        if (this.notifier) {
+          await this.notifier.notifyRiskTrigger({
+            type: triggerType as 'STOP_LOSS' | 'TAKE_PROFIT',
+            title: position.title,
+            outcome: position.outcome,
+            entryPrice: position.avgPrice,
+            currentPrice,
+            pnlPercent,
+            size: position.size,
+            success: true,
+            orderId: result.orderId,
+          });
+        }
       } else {
         console.log(`  ❌ ${reason} failed: ${result.error}`);
+
+        // Send failure notification
+        if (this.notifier) {
+          await this.notifier.notifyRiskTrigger({
+            type: triggerType as 'STOP_LOSS' | 'TAKE_PROFIT',
+            title: position.title,
+            outcome: position.outcome,
+            entryPrice: position.avgPrice,
+            currentPrice,
+            pnlPercent,
+            size: position.size,
+            success: false,
+            error: result.error,
+          });
+        }
       }
     } catch (error: any) {
       console.log(`  ❌ ${reason} error: ${error?.message || error}`);
+
+      // Send error notification
+      if (this.notifier) {
+        await this.notifier.notifyRiskTrigger({
+          type: triggerType as 'STOP_LOSS' | 'TAKE_PROFIT',
+          title: position.title,
+          outcome: position.outcome,
+          entryPrice: position.avgPrice,
+          currentPrice,
+          pnlPercent,
+          size: position.size,
+          success: false,
+          error: error?.message || 'Unknown error',
+        });
+      }
     }
   }
 }

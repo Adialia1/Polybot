@@ -12,6 +12,7 @@ export interface QueuedOrder {
   createdAt: number;
   processedAt?: number;
   result?: any;
+  retryCount: number;      // Number of retry attempts made
 }
 
 export interface OrderQueueConfig {
@@ -70,6 +71,7 @@ export class OrderQueue extends EventEmitter {
       amount,
       status: 'pending',
       createdAt: Date.now(),
+      retryCount: 0,
     };
 
     this.queue.push(order);

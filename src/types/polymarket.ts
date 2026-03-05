@@ -92,9 +92,14 @@ export interface CopyConfig {
   // Probability filters (price = probability on Polymarket)
   minProbability: number; // Skip trades below this (e.g., 0.05 = 5%)
   maxProbability: number; // Skip trades above this (e.g., 0.95 = 95%)
+  // Market blacklist
+  blacklistKeywords: string[]; // Keywords to block (e.g., ["NBA", "NFL", "soccer"])
   // Trading settings
   enableTrading: boolean; // Enable actual trade execution
   dryRun: boolean; // If true, simulate trades without executing
   privateKey?: string; // Polygon wallet private key
   funderAddress?: string; // Proxy wallet address (if using Magic/email wallet)
+  // Retry settings
+  maxRetries: number; // Max retry attempts for failed orders (default: 3)
+  retryDelayMs: number; // Base delay between retries in ms (default: 2000)
 }
