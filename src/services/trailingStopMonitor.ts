@@ -87,6 +87,34 @@ export class TrailingStopMonitor extends EventEmitter {
   }
 
   /**
+   * Update configuration (for hot-reload support)
+   */
+  updateConfig(newConfig: Partial<TrailingStopConfig>): void {
+    if (newConfig.trailingStopPercent !== undefined) {
+      this.config.trailingStopPercent = newConfig.trailingStopPercent;
+      console.log(`[TrailingStop] Updated trailingStopPercent to ${newConfig.trailingStopPercent}%`);
+    }
+
+    if (newConfig.checkIntervalMs !== undefined && newConfig.checkIntervalMs !== this.config.checkIntervalMs) {
+      this.config.checkIntervalMs = newConfig.checkIntervalMs;
+      console.log(`[TrailingStop] Updated checkIntervalMs to ${newConfig.checkIntervalMs}ms`);
+
+      // Restart the interval with new timing
+      if (this.checkInterval) {
+        this.stopMonitoring();
+        this.startMonitoring();
+      }
+    }
+  }
+
+  /**
+   * Update dry run mode
+   */
+  setDryRun(dryRun: boolean): void {
+    this.dryRun = dryRun;
+  }
+
+  /**
    * Check all positions for trailing stop conditions
    */
   private async checkPositions(): Promise<void> {

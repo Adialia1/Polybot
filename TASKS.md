@@ -67,19 +67,19 @@
 - [x] Config: MAX_HOLD_TIME_HOURS (e.g., 48)
 - [x] Auto-sell positions held longer than limit
 
-### 13. Market Whitelist
-- [ ] Config: WHITELIST_KEYWORDS (e.g., "Bitcoin", "Trump", "Election")
-- [ ] Only copy trades matching whitelisted keywords
+### 13. Market Whitelist ✅
+- [x] Config: WHITELIST_KEYWORDS (e.g., "Bitcoin", "Trump", "Election")
+- [x] Only copy trades matching whitelisted keywords
 
-### 14. Web Dashboard
-- [ ] Simple Express server with React/HTML dashboard
-- [ ] Show positions, recent trades, P&L chart
-- [ ] Manual controls (pause bot, force sell)
+### 14. Web Dashboard ✅
+- [x] Simple Express server with React/HTML dashboard
+- [x] Show positions, recent trades, P&L chart
+- [x] Manual controls (pause bot, force sell)
 
-### 15. Config File Support
-- [ ] Load settings from config.json instead of just .env
-- [ ] Easier to manage complex settings
-- [ ] Hot-reload config without restart
+### 15. Config File Support ✅
+- [x] Load settings from config.json instead of just .env
+- [x] Easier to manage complex settings
+- [x] Hot-reload config without restart
 
 ---
 
@@ -105,7 +105,7 @@
 - [x] 11. Buy-Only Mode
 - [x] 12. Time-Based Exits
 
-### Batch 5
-- [ ] 13. Market Whitelist
-- [ ] 14. Web Dashboard
-- [ ] 15. Config File Support
+### Batch 5 ✅ DONE
+- [x] 13. Market Whitelist
+- [x] 14. Web Dashboard
+- [x] 15. Config File Support

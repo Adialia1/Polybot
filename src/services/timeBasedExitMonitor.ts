@@ -102,6 +102,34 @@ export class TimeBasedExitMonitor extends EventEmitter {
   }
 
   /**
+   * Update configuration (for hot-reload support)
+   */
+  updateConfig(newConfig: Partial<TimeBasedExitConfig>): void {
+    if (newConfig.maxHoldTimeHours !== undefined) {
+      this.config.maxHoldTimeHours = newConfig.maxHoldTimeHours;
+      console.log(`[TimeBasedExit] Updated maxHoldTimeHours to ${newConfig.maxHoldTimeHours}h`);
+    }
+
+    if (newConfig.checkIntervalMs !== undefined && newConfig.checkIntervalMs !== this.config.checkIntervalMs) {
+      this.config.checkIntervalMs = newConfig.checkIntervalMs;
+      console.log(`[TimeBasedExit] Updated checkIntervalMs to ${newConfig.checkIntervalMs}ms`);
+
+      // Restart the interval with new timing
+      if (this.checkInterval) {
+        this.stopMonitoring();
+        this.startMonitoring();
+      }
+    }
+  }
+
+  /**
+   * Update dry run mode
+   */
+  setDryRun(dryRun: boolean): void {
+    this.dryRun = dryRun;
+  }
+
+  /**
    * Check all positions for time-based exit conditions
    */
   private async checkPositions(): Promise<void> {

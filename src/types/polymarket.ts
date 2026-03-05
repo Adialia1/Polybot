@@ -109,6 +109,8 @@ export interface CopyConfig {
   maxProbability: number; // Skip trades above this (e.g., 0.95 = 95%)
   // Market blacklist
   blacklistKeywords: string[]; // Keywords to block (e.g., ["NBA", "NFL", "soccer"])
+  // Market whitelist
+  whitelistKeywords: string[]; // Keywords to allow (e.g., ["Bitcoin", "Trump", "Election"]) - if empty, all markets allowed
   // Position limits
   maxOpenPositions: number; // Max number of open positions (0 = unlimited)
   // Trading settings
@@ -133,4 +135,7 @@ export interface CopyConfig {
   copySells: boolean; // If false, ignore sell signals from tracked traders (default: true)
   // Time-based exit
   maxHoldTimeHours: number; // Auto-sell positions held longer than this (0 = disabled)
+  // Web Dashboard
+  dashboardEnabled: boolean; // Enable web dashboard server
+  dashboardPort: number; // Port for web dashboard (default: 8080)
 }

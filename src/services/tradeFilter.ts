@@ -45,3 +45,48 @@ export function getMatchingBlacklistKeyword(title: string, blacklist: string[]):
 
   return null;
 }
+
+/**
+ * Check if a market title matches any whitelisted keywords
+ * @param title - The market title to check
+ * @param whitelist - Array of keywords to allow (case-insensitive)
+ * @returns true if the market matches the whitelist (or whitelist is empty), false otherwise
+ */
+export function isMarketWhitelisted(title: string, whitelist: string[]): boolean {
+  // If whitelist is empty, feature is disabled - allow all markets
+  if (!whitelist || whitelist.length === 0) {
+    return true;
+  }
+
+  const titleLower = title.toLowerCase();
+
+  for (const keyword of whitelist) {
+    if (titleLower.includes(keyword.toLowerCase())) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Get the matching whitelist keyword for a market title
+ * @param title - The market title to check
+ * @param whitelist - Array of keywords to allow (case-insensitive)
+ * @returns The matching keyword or null if not whitelisted
+ */
+export function getMatchingWhitelistKeyword(title: string, whitelist: string[]): string | null {
+  if (!whitelist || whitelist.length === 0) {
+    return null;
+  }
+
+  const titleLower = title.toLowerCase();
+
+  for (const keyword of whitelist) {
+    if (titleLower.includes(keyword.toLowerCase())) {
+      return keyword;
+    }
+  }
+
+  return null;
+}

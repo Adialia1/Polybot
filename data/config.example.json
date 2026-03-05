@@ -1,0 +1,94 @@
+{
+  "_comment": "Polybot Configuration File",
+  "_description": "This file configures the copy trading bot. Settings here override .env values.",
+  "_hotReload": "Most settings support hot-reload (no restart needed). See comments below.",
+
+  "_section_core": "=== Core Settings ===",
+  "dryRun": true,
+  "enableTrading": false,
+
+  "_section_sizing": "=== Position Sizing (hot-reloadable) ===",
+  "maxPositionSize": 10,
+  "minTradeSize": 1,
+  "userAccountSize": 30,
+  "maxPercentagePerTrade": 20,
+
+  "_section_wallets": "=== Wallets to Track (requires restart) ===",
+  "trackWallets": [
+    {
+      "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
+      "alias": "RN1",
+      "enabled": true,
+      "allocation": 60
+    },
+    {
+      "address": "0x1234567890abcdef1234567890abcdef12345678",
+      "alias": "tripping",
+      "enabled": true,
+      "allocation": 40
+    }
+  ],
+
+  "_section_filters": "=== Market Filters (hot-reloadable) ===",
+  "minProbability": 0.05,
+  "maxProbability": 0.95,
+  "blacklistKeywords": ["NBA", "NFL", "soccer", "MLS"],
+  "whitelistKeywords": [],
+
+  "_section_limits": "=== Position Limits (hot-reloadable) ===",
+  "maxOpenPositions": 0,
+  "dailyLossLimit": 50,
+
+  "_section_risk": "=== Risk Management (hot-reloadable) ===",
+  "trailingStopPercent": 15,
+  "trailingStopCheckIntervalMs": 60000,
+  "maxHoldTimeHours": 0,
+
+  "_section_trading": "=== Trading Behavior (hot-reloadable) ===",
+  "copySells": true,
+  "conflictStrategy": "first",
+  "copyDelayMs": 500,
+  "maxRetries": 3,
+  "retryDelayMs": 2000,
+
+  "_section_timing": "=== Timing (requires restart) ===",
+  "pollingIntervalMs": 1000,
+
+  "_section_servers": "=== Server Settings (requires restart) ===",
+  "healthCheckEnabled": false,
+  "healthCheckPort": 3000,
+  "dashboardEnabled": false,
+  "dashboardPort": 8080,
+
+  "_hotReloadSettings": [
+    "maxPositionSize",
+    "minTradeSize",
+    "maxPercentagePerTrade",
+    "minProbability",
+    "maxProbability",
+    "blacklistKeywords",
+    "whitelistKeywords",
+    "maxOpenPositions",
+    "dryRun",
+    "dailyLossLimit",
+    "trailingStopPercent",
+    "trailingStopCheckIntervalMs",
+    "conflictStrategy",
+    "copySells",
+    "maxHoldTimeHours",
+    "copyDelayMs",
+    "maxRetries",
+    "retryDelayMs"
+  ],
+
+  "_restartRequiredSettings": [
+    "wallets/trackWallets",
+    "pollingIntervalMs",
+    "enableTrading",
+    "userAccountSize",
+    "healthCheckEnabled",
+    "healthCheckPort",
+    "dashboardEnabled",
+    "dashboardPort"
+  ]
+}

@@ -1,4 +1,11 @@
 import { CopyConfig, ConflictStrategy } from './types/index.js';
+import { getConfigLoader, HOT_RELOADABLE_SETTINGS, RESTART_REQUIRED_SETTINGS } from './services/configLoader.js';
+
+// Current merged config (updated on hot-reload)
+let currentConfig: CopyConfig | null = null;
+
+// Re-export for convenience
+export { HOT_RELOADABLE_SETTINGS, RESTART_REQUIRED_SETTINGS };
 
 // Default configuration
 export const defaultConfig: CopyConfig = {
@@ -19,6 +26,7 @@ export const defaultConfig: CopyConfig = {
   minProbability: 0.05, // Skip trades with <5% probability (lottery tickets)
   maxProbability: 0.95, // Skip trades with >95% probability (low upside)
   blacklistKeywords: [], // Keywords to block (set via BLACKLIST_KEYWORDS env var)
+  whitelistKeywords: [], // Keywords to allow (set via WHITELIST_KEYWORDS env var) - if empty, all markets allowed
   maxOpenPositions: 0, // Max open positions (0 = unlimited)
   // Trading settings
   enableTrading: false, // Disabled by default - set to true to execute trades
@@ -42,9 +50,15 @@ export const defaultConfig: CopyConfig = {
   copySells: true, // Copy sell signals from tracked traders (set to false for buy-only mode)
   // Time-based exit
   maxHoldTimeHours: 0, // Auto-sell positions held longer than this (0 = disabled)
+  // Web Dashboard
+  dashboardEnabled: false, // Enable web dashboard (set via DASHBOARD_ENABLED)
+  dashboardPort: 8080, // Port for web dashboard (set via DASHBOARD_PORT)
 };
 
-export function loadConfig(): CopyConfig {
+/**
+ * Load config from environment variables only (internal helper)
+ */
+function loadConfigFromEnv(): CopyConfig {
   const config = { ...defaultConfig };
 
   // Load wallets from environment variable if set
@@ -63,16 +77,6 @@ export function loadConfig(): CopyConfig {
   // Override from env vars
   if (process.env.POLLING_INTERVAL_MS) {
     config.pollingIntervalMs = parseInt(process.env.POLLING_INTERVAL_MS, 10);
-  }
-
-  // Auto-adjust polling interval based on wallet count to respect rate limits
-  // Polymarket /trades limit: 200 req/10s = 20 req/sec
-  // Target: stay under 50% of limit (10 req/sec max)
-  const enabledWallets = config.wallets.filter(w => w.enabled).length;
-  const minIntervalMs = Math.ceil((enabledWallets / 10) * 1000); // 10 wallets = 1s min
-  if (config.pollingIntervalMs < minIntervalMs) {
-    console.log(`[Config] Auto-adjusted polling to ${minIntervalMs}ms for ${enabledWallets} wallets (rate limit protection)`);
-    config.pollingIntervalMs = minIntervalMs;
   }
 
   if (process.env.COPY_DELAY_MS) {
@@ -106,6 +110,14 @@ export function loadConfig(): CopyConfig {
   // Blacklist keywords (comma-separated)
   if (process.env.BLACKLIST_KEYWORDS) {
     config.blacklistKeywords = process.env.BLACKLIST_KEYWORDS
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0);
+  }
+
+  // Whitelist keywords (comma-separated) - if empty, all markets allowed
+  if (process.env.WHITELIST_KEYWORDS) {
+    config.whitelistKeywords = process.env.WHITELIST_KEYWORDS
       .split(',')
       .map(k => k.trim())
       .filter(k => k.length > 0);
@@ -186,5 +198,140 @@ export function loadConfig(): CopyConfig {
     config.maxHoldTimeHours = parseFloat(process.env.MAX_HOLD_TIME_HOURS);
   }
 
+  // Web Dashboard
+  if (process.env.DASHBOARD_ENABLED === 'true') {
+    config.dashboardEnabled = true;
+  }
+
+  if (process.env.DASHBOARD_PORT) {
+    config.dashboardPort = parseInt(process.env.DASHBOARD_PORT, 10);
+  }
+
   return config;
+}
+
+/**
+ * Load config with priority: config.json > .env > defaults
+ *
+ * Config file settings override environment variables.
+ * Use getConfig() to access the current merged config.
+ */
+export function loadConfig(): CopyConfig {
+  // Start with env-based config
+  const envConfig = loadConfigFromEnv();
+
+  // Try to load from config.json
+  const configLoader = getConfigLoader();
+  const fileResult = configLoader.loadFromFile();
+
+  // Log any validation errors
+  if (fileResult.errors.length > 0) {
+    console.warn('[Config] Config file validation errors:');
+    fileResult.errors.forEach(e => console.warn(`  - ${e}`));
+  }
+
+  // Merge: file config overrides env config
+  const mergedConfig = { ...envConfig };
+
+  if (fileResult.source === 'file') {
+    // Track which settings came from file vs env
+    const fileSettings: string[] = [];
+    const envOverridden: string[] = [];
+
+    for (const [key, value] of Object.entries(fileResult.config)) {
+      if (value !== undefined) {
+        const envValue = (envConfig as any)[key];
+        const defaultValue = (defaultConfig as any)[key];
+
+        // Check if env had a different value than default
+        if (JSON.stringify(envValue) !== JSON.stringify(defaultValue)) {
+          envOverridden.push(key);
+        }
+
+        (mergedConfig as any)[key] = value;
+        fileSettings.push(key);
+      }
+    }
+
+    // Log config sources
+    if (fileSettings.length > 0) {
+      console.log('[Config] Loaded from config.json:');
+      fileSettings.forEach(s => console.log(`  - ${s}`));
+    }
+
+    if (envOverridden.length > 0) {
+      console.log('[Config] Environment values overridden by config.json:');
+      envOverridden.forEach(s => console.log(`  - ${s}`));
+    }
+  } else {
+    console.log('[Config] No config.json found, using environment variables');
+  }
+
+  // Auto-adjust polling interval based on wallet count to respect rate limits
+  // Polymarket /trades limit: 200 req/10s = 20 req/sec
+  // Target: stay under 50% of limit (10 req/sec max)
+  const enabledWallets = mergedConfig.wallets.filter(w => w.enabled).length;
+  const minIntervalMs = Math.ceil((enabledWallets / 10) * 1000); // 10 wallets = 1s min
+  if (mergedConfig.pollingIntervalMs < minIntervalMs) {
+    console.log(`[Config] Auto-adjusted polling to ${minIntervalMs}ms for ${enabledWallets} wallets (rate limit protection)`);
+    mergedConfig.pollingIntervalMs = minIntervalMs;
+  }
+
+  // Store as current config
+  currentConfig = mergedConfig;
+
+  return mergedConfig;
+}
+
+/**
+ * Get the current merged config
+ * Returns the last loaded config, or loads it if not yet loaded
+ */
+export function getConfig(): CopyConfig {
+  if (!currentConfig) {
+    return loadConfig();
+  }
+  return currentConfig;
+}
+
+/**
+ * Update the current config with new values (used for hot-reload)
+ * Only updates hot-reloadable settings
+ */
+export function updateConfig(newValues: Partial<CopyConfig>): void {
+  if (!currentConfig) {
+    currentConfig = loadConfig();
+  }
+
+  const updated: string[] = [];
+
+  for (const key of HOT_RELOADABLE_SETTINGS) {
+    if (key in newValues && (newValues as any)[key] !== undefined) {
+      (currentConfig as any)[key] = (newValues as any)[key];
+      updated.push(key);
+    }
+  }
+
+  if (updated.length > 0) {
+    console.log('[Config] Hot-reloaded settings:');
+    updated.forEach(s => console.log(`  - ${s}`));
+  }
+
+  // Check for settings that require restart
+  const requiresRestart: string[] = [];
+  for (const key of RESTART_REQUIRED_SETTINGS) {
+    if (key in newValues && (newValues as any)[key] !== undefined) {
+      const currentVal = JSON.stringify((currentConfig as any)[key]);
+      const newVal = JSON.stringify((newValues as any)[key]);
+      if (currentVal !== newVal) {
+        requiresRestart.push(key);
+      }
+    }
+  }
+
+  if (requiresRestart.length > 0) {
+    console.log('[Config] Settings changed that require restart:');
+    requiresRestart.forEach(s => console.log(`  - ${s}`));
+    console.log('[Config] Restart the bot to apply these changes');
+  }
 }

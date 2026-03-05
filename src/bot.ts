@@ -11,10 +11,12 @@ import { TimeBasedExitMonitor } from './services/timeBasedExitMonitor.js';
 import { Trader } from './services/trader.js';
 import { TelegramNotifier } from './services/notifier.js';
 import { HealthCheckServer } from './services/healthCheck.js';
-import { isMarketBlacklisted } from './services/tradeFilter.js';
+import { DashboardServer } from './services/dashboard.js';
+import { isMarketBlacklisted, isMarketWhitelisted } from './services/tradeFilter.js';
+import { getConfigLoader } from './services/configLoader.js';
 import { ClobApiClient } from './api/clobApi.js';
-import { loadConfig } from './config.js';
-import { TradeSignal, WalletConfig, Trade, RecentSignal } from './types/index.js';
+import { loadConfig, updateConfig, getConfig } from './config.js';
+import { TradeSignal, WalletConfig, Trade, RecentSignal, CopyConfig } from './types/index.js';
 
 // Conflict resolution timeout (5 minutes in milliseconds)
 const CONFLICT_WINDOW_MS = 5 * 60 * 1000;
@@ -35,7 +37,9 @@ export class CopyTradingBot {
   private clobApi: ClobApiClient;
   private notifier: TelegramNotifier;
   private healthCheckServer: HealthCheckServer | null = null;
+  private dashboardServer: DashboardServer | null = null;
   private isRunning = false;
+  private isPaused = false;
   // Recent signals for conflict detection (in-memory, not persisted)
   private recentSignals: RecentSignal[] = [];
 
@@ -269,7 +273,95 @@ export class CopyTradingBot {
       }
     }
 
+    // Start dashboard server if enabled
+    if (this.config.dashboardEnabled) {
+      this.dashboardServer = new DashboardServer(
+        {
+          port: this.config.dashboardPort,
+          stateManager: this.stateManager,
+          orderQueue: this.orderQueue,
+          clobApi: this.clobApi,
+          trader: this.trader,
+          dryRun: this.config.dryRun,
+        },
+        {
+          onPause: () => {
+            this.isPaused = true;
+            console.log('[Bot] Paused via dashboard');
+          },
+          onResume: () => {
+            this.isPaused = false;
+            console.log('[Bot] Resumed via dashboard');
+          },
+          onForceSell: async (asset: string) => {
+            return this.forceSellPosition(asset);
+          },
+        }
+      );
+
+      try {
+        await this.dashboardServer.start();
+      } catch (err) {
+        console.error('[Dashboard] Failed to start server:', err);
+        // Continue anyway - dashboard is optional
+      }
+    }
+
+    // Start config file watcher for hot-reload
+    this.setupConfigHotReload();
+
     console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
+  }
+
+  /**
+   * Setup config file watcher for hot-reload support
+   */
+  private setupConfigHotReload(): void {
+    const configLoader = getConfigLoader();
+
+    // Start watching for config file changes
+    configLoader.startWatching();
+
+    // Handle config reload events
+    configLoader.on('configReload', (newConfig: Partial<CopyConfig>) => {
+      console.log('\n[Config] Hot-reloading configuration...');
+
+      // Update the global config with hot-reloadable settings
+      updateConfig(newConfig);
+
+      // Re-read the updated config
+      this.config = getConfig();
+
+      // Update position sizer with new limits
+      this.positionSizer = new PositionSizer({
+        userAccountSize: this.config.userAccountSize,
+        maxPositionSize: this.config.maxPositionSize,
+        minTradeSize: this.config.minTradeSize,
+        maxPercentage: this.config.maxPercentagePerTrade,
+      });
+
+      // Update trailing stop monitor if percent changed
+      if (this.trailingStopMonitor && this.config.trailingStopPercent > 0) {
+        this.trailingStopMonitor.updateConfig({
+          trailingStopPercent: this.config.trailingStopPercent,
+          checkIntervalMs: this.config.trailingStopCheckIntervalMs,
+        });
+      }
+
+      // Update time-based exit monitor if hours changed
+      if (this.timeBasedExitMonitor && this.config.maxHoldTimeHours > 0) {
+        this.timeBasedExitMonitor.updateConfig({
+          maxHoldTimeHours: this.config.maxHoldTimeHours,
+        });
+      }
+
+      // Update trader dry run mode
+      if (this.trader) {
+        this.trader.setDryRun(this.config.dryRun);
+      }
+
+      console.log('[Config] Configuration hot-reloaded successfully');
+    });
   }
 
   /**
@@ -465,6 +557,12 @@ export class CopyTradingBot {
   }
 
   private async handleTradeSignal(signal: TradeSignal, wallet: WalletConfig): Promise<void> {
+    // Check if bot is paused
+    if (this.isPaused) {
+      console.log(`[Paused] Ignoring trade signal from ${wallet.alias} - bot is paused`);
+      return;
+    }
+
     const trade = signal.trade;
     const tradePrice = parseFloat(String(trade.price));
 
@@ -481,6 +579,12 @@ export class CopyTradingBot {
     // Filter by market blacklist
     if (isMarketBlacklisted(trade.title, this.config.blacklistKeywords)) {
       console.log(`[Blacklist] Skipped ${wallet.alias}'s trade on "${trade.title}" (market blacklisted)`);
+      return;
+    }
+
+    // Filter by market whitelist (if whitelist is configured, trade must match)
+    if (!isMarketWhitelisted(trade.title, this.config.whitelistKeywords)) {
+      console.log(`[Filter] Trade skipped - not in whitelist: ${trade.title}`);
       return;
     }
 
@@ -846,6 +950,107 @@ export class CopyTradingBot {
     }
   }
 
+  /**
+   * Force sell a position (called from dashboard)
+   */
+  private async forceSellPosition(asset: string): Promise<{ success: boolean; error?: string }> {
+    const position = this.stateManager.getPosition(asset);
+    if (!position) {
+      return { success: false, error: 'Position not found' };
+    }
+
+    if (!this.trader) {
+      return { success: false, error: 'Trader not initialized' };
+    }
+
+    console.log(`\n[Dashboard] Force selling position: ${position.title}`);
+
+    try {
+      // Get current price for the sell
+      const currentPrice = await this.clobApi.getMidpoint(asset);
+      const price = parseFloat(currentPrice);
+
+      // Create a synthetic trade for the sell
+      const trade = {
+        id: `dashboard-sell-${Date.now()}`,
+        proxyWallet: '',
+        side: 'SELL' as const,
+        asset,
+        conditionId: '',
+        size: String(position.size),
+        price: String(price),
+        timestamp: Math.floor(Date.now() / 1000),
+        title: position.title,
+        slug: position.slug,
+        outcome: position.outcome,
+        outcomeIndex: 0,
+        transactionHash: '',
+        eventSlug: '',
+      };
+
+      // Calculate sell amount
+      const amount = position.size * price;
+
+      // Execute the sell
+      const result = await this.trader.copyTrade(trade, amount);
+
+      if (result.success) {
+        // Capture position info before updating for P&L calculation
+        const avgPrice = position.avgPrice;
+        const entryTime = position.entryTime;
+        const walletAlias = position.walletAlias || 'Dashboard';
+
+        // Update state manager
+        if (result.details) {
+          this.stateManager.updatePosition(
+            asset,
+            -result.details.size,
+            result.details.price,
+            { title: position.title, outcome: position.outcome }
+          );
+
+          // Record trader stats
+          const sellPrice = result.details.price;
+          const sharesSold = result.details.size;
+          const pnl = (sellPrice - avgPrice) * sharesSold;
+          const holdTimeMs = Date.now() - entryTime;
+          this.stateManager.recordTraderTrade(walletAlias, pnl, holdTimeMs);
+
+          // Update daily P&L
+          this.stateManager.updateDailyPnL(pnl);
+        }
+
+        // Record successful trade
+        this.stateManager.recordTrade(true, amount);
+
+        // Update dashboard last trade time
+        if (this.dashboardServer) {
+          this.dashboardServer.updateLastTradeTime();
+        }
+
+        // Send notification
+        await this.notifier.notifyTradeExecuted({
+          side: 'SELL',
+          title: position.title,
+          outcome: position.outcome,
+          amount,
+          price: result.details?.price || price,
+          size: result.details?.size || position.size,
+          orderId: result.orderId,
+          walletAlias: 'Dashboard',
+        });
+
+        console.log(`[Dashboard] Position sold successfully`);
+        return { success: true };
+      } else {
+        return { success: false, error: result.error || 'Trade failed' };
+      }
+    } catch (err: any) {
+      console.error('[Dashboard] Force sell failed:', err);
+      return { success: false, error: err.message || 'Unknown error' };
+    }
+  }
+
   private printStatus(): void {
     console.log('\n✅ Bot is running!');
     const enabledWallets = this.config.wallets.filter(w => w.enabled);
@@ -856,6 +1061,10 @@ export class CopyTradingBot {
 
     if (this.config.blacklistKeywords.length > 0) {
       console.log(`Blacklist: ${this.config.blacklistKeywords.join(', ')}`);
+    }
+
+    if (this.config.whitelistKeywords.length > 0) {
+      console.log(`Whitelist: ${this.config.whitelistKeywords.join(', ')}`);
     }
 
     if (this.config.enableTrading) {
@@ -947,6 +1156,15 @@ export class CopyTradingBot {
     if (this.healthCheckServer) {
       await this.healthCheckServer.stop();
     }
+
+    // Stop dashboard server
+    if (this.dashboardServer) {
+      await this.dashboardServer.stop();
+    }
+
+    // Stop config file watcher
+    const configLoader = getConfigLoader();
+    configLoader.stopWatching();
 
     // Send Telegram notification that bot stopped
     const stats = this.stateManager.getStats();

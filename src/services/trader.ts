@@ -248,4 +248,16 @@ export class Trader {
   isDryRun(): boolean {
     return this.config.dryRun || false;
   }
+
+  /**
+   * Update dry run mode (for hot-reload support)
+   */
+  setDryRun(dryRun: boolean): void {
+    const previousMode = this.config.dryRun;
+    this.config.dryRun = dryRun;
+
+    if (previousMode !== dryRun) {
+      console.log(`[Trader] Dry run mode changed: ${previousMode ? 'DRY RUN' : 'LIVE'} -> ${dryRun ? 'DRY RUN' : 'LIVE'}`);
+    }
+  }
 }
