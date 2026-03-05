@@ -82,6 +82,20 @@ export interface WalletConfig {
   allocation?: number; // 0-100, percentage of position size to use for this trader (default: 100)
 }
 
+// Conflict resolution strategy when tracked traders make opposite trades
+export type ConflictStrategy = 'first' | 'skip' | 'majority' | 'highest_allocation';
+
+// Recent trade signal for conflict detection
+export interface RecentSignal {
+  market: string;       // Market slug or conditionId
+  side: 'BUY' | 'SELL';
+  outcome: string;      // e.g., "Yes" or "No"
+  walletAlias: string;
+  walletAddress: string;
+  allocation: number;   // Trader's allocation percentage
+  timestamp: number;
+}
+
 export interface CopyConfig {
   wallets: WalletConfig[];
   pollingIntervalMs: number;
@@ -113,4 +127,10 @@ export interface CopyConfig {
   // Health check server
   healthCheckEnabled: boolean; // Enable HTTP health check server
   healthCheckPort: number; // Port for health check server (default: 3000)
+  // Conflict resolution
+  conflictStrategy: ConflictStrategy; // Strategy when traders make opposite trades
+  // Buy-only mode
+  copySells: boolean; // If false, ignore sell signals from tracked traders (default: true)
+  // Time-based exit
+  maxHoldTimeHours: number; // Auto-sell positions held longer than this (0 = disabled)
 }

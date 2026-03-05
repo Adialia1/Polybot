@@ -1,4 +1,4 @@
-import { CopyConfig } from './types/index.js';
+import { CopyConfig, ConflictStrategy } from './types/index.js';
 
 // Default configuration
 export const defaultConfig: CopyConfig = {
@@ -36,6 +36,12 @@ export const defaultConfig: CopyConfig = {
   // Health check server
   healthCheckEnabled: false, // Enable HTTP health check server (set via HEALTH_CHECK_ENABLED)
   healthCheckPort: 3000, // Port for health check server (set via HEALTH_CHECK_PORT)
+  // Conflict resolution
+  conflictStrategy: 'first' as ConflictStrategy, // Strategy when traders make opposite trades: 'first' | 'skip' | 'majority' | 'highest_allocation'
+  // Buy-only mode
+  copySells: true, // Copy sell signals from tracked traders (set to false for buy-only mode)
+  // Time-based exit
+  maxHoldTimeHours: 0, // Auto-sell positions held longer than this (0 = disabled)
 };
 
 export function loadConfig(): CopyConfig {
@@ -158,6 +164,26 @@ export function loadConfig(): CopyConfig {
 
   if (process.env.HEALTH_CHECK_PORT) {
     config.healthCheckPort = parseInt(process.env.HEALTH_CHECK_PORT, 10);
+  }
+
+  // Conflict resolution strategy
+  if (process.env.CONFLICT_STRATEGY) {
+    const strategy = process.env.CONFLICT_STRATEGY.toLowerCase() as ConflictStrategy;
+    if (['first', 'skip', 'majority', 'highest_allocation'].includes(strategy)) {
+      config.conflictStrategy = strategy;
+    } else {
+      console.warn(`[Config] Invalid CONFLICT_STRATEGY "${process.env.CONFLICT_STRATEGY}", using default "first"`);
+    }
+  }
+
+  // Buy-only mode (COPY_SELLS=false disables copying sell signals)
+  if (process.env.COPY_SELLS === 'false') {
+    config.copySells = false;
+  }
+
+  // Time-based exit (0 = disabled)
+  if (process.env.MAX_HOLD_TIME_HOURS) {
+    config.maxHoldTimeHours = parseFloat(process.env.MAX_HOLD_TIME_HOURS);
   }
 
   return config;

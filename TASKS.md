@@ -47,10 +47,10 @@
 - [x] Skip new BUY signals if at limit
 - [x] Still allow SELL signals
 
-### 9. Conflict Resolution
-- [ ] Detect when tracked traders make opposite trades on same market
-- [ ] Options: follow majority, follow highest allocation trader, skip conflicting trades
-- [ ] Config: CONFLICT_STRATEGY
+### 9. Conflict Resolution ✅
+- [x] Detect when tracked traders make opposite trades on same market
+- [x] Options: follow majority, follow highest allocation trader, skip conflicting trades
+- [x] Config: CONFLICT_STRATEGY
 
 ### 10. Health Check Endpoint ✅
 - [x] Simple HTTP server on configurable port
@@ -59,13 +59,13 @@
 
 ## Lower Priority
 
-### 11. Buy-Only Mode
-- [ ] Config: COPY_SELLS=false to ignore sell signals
-- [ ] Manage exits yourself with stop loss / take profit
+### 11. Buy-Only Mode ✅
+- [x] Config: COPY_SELLS=false to ignore sell signals
+- [x] Manage exits yourself with stop loss / take profit
 
-### 12. Time-Based Exits
-- [ ] Config: MAX_HOLD_TIME_HOURS (e.g., 48)
-- [ ] Auto-sell positions held longer than limit
+### 12. Time-Based Exits ✅
+- [x] Config: MAX_HOLD_TIME_HOURS (e.g., 48)
+- [x] Auto-sell positions held longer than limit
 
 ### 13. Market Whitelist
 - [ ] Config: WHITELIST_KEYWORDS (e.g., "Bitcoin", "Trump", "Election")
@@ -100,10 +100,10 @@
 - [x] 7. Trailing Stop Loss
 - [x] 10. Health Check Endpoint
 
-### Batch 4
-- [ ] 9. Conflict Resolution
-- [ ] 11. Buy-Only Mode
-- [ ] 12. Time-Based Exits
+### Batch 4 ✅ DONE
+- [x] 9. Conflict Resolution
+- [x] 11. Buy-Only Mode
+- [x] 12. Time-Based Exits
 
 ### Batch 5
 - [ ] 13. Market Whitelist

@@ -7,13 +7,17 @@ import { StateManager } from './services/stateManager.js';
 import { PositionReconciler } from './services/positionReconciler.js';
 import { RiskManager } from './services/riskManager.js';
 import { TrailingStopMonitor } from './services/trailingStopMonitor.js';
+import { TimeBasedExitMonitor } from './services/timeBasedExitMonitor.js';
 import { Trader } from './services/trader.js';
 import { TelegramNotifier } from './services/notifier.js';
 import { HealthCheckServer } from './services/healthCheck.js';
 import { isMarketBlacklisted } from './services/tradeFilter.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig } from './config.js';
-import { TradeSignal, WalletConfig, Trade } from './types/index.js';
+import { TradeSignal, WalletConfig, Trade, RecentSignal } from './types/index.js';
+
+// Conflict resolution timeout (5 minutes in milliseconds)
+const CONFLICT_WINDOW_MS = 5 * 60 * 1000;
 
 export class CopyTradingBot {
   private config = loadConfig();
@@ -26,11 +30,14 @@ export class CopyTradingBot {
   private reconcileInterval: NodeJS.Timeout | null = null;
   private riskManager: RiskManager | null = null;
   private trailingStopMonitor: TrailingStopMonitor | null = null;
+  private timeBasedExitMonitor: TimeBasedExitMonitor | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
   private notifier: TelegramNotifier;
   private healthCheckServer: HealthCheckServer | null = null;
   private isRunning = false;
+  // Recent signals for conflict detection (in-memory, not persisted)
+  private recentSignals: RecentSignal[] = [];
 
   constructor() {
     this.clobApi = new ClobApiClient();
@@ -194,6 +201,21 @@ export class CopyTradingBot {
         );
         this.trailingStopMonitor.startMonitoring();
       }
+
+      // Initialize time-based exit monitor (if enabled via config)
+      if (this.config.maxHoldTimeHours > 0) {
+        this.timeBasedExitMonitor = new TimeBasedExitMonitor(
+          {
+            maxHoldTimeHours: this.config.maxHoldTimeHours,
+            checkIntervalMs: 5 * 60 * 1000, // Check every 5 minutes
+          },
+          this.stateManager,
+          this.trader,
+          this.config.dryRun,
+          this.notifier
+        );
+        this.timeBasedExitMonitor.startMonitoring();
+      }
     }
 
     // Initialize trade monitor
@@ -250,6 +272,198 @@ export class CopyTradingBot {
     console.log('\nWaiting for new trades... (Ctrl+C to stop)\n');
   }
 
+  /**
+   * Clean up signals older than the conflict window (5 minutes)
+   */
+  private cleanupOldSignals(): void {
+    const cutoffTime = Date.now() - CONFLICT_WINDOW_MS;
+    this.recentSignals = this.recentSignals.filter(s => s.timestamp >= cutoffTime);
+  }
+
+  /**
+   * Add a new signal to the recent signals list
+   */
+  private recordSignal(trade: Trade, wallet: WalletConfig): void {
+    this.cleanupOldSignals();
+
+    this.recentSignals.push({
+      market: trade.conditionId,
+      side: trade.side,
+      outcome: trade.outcome,
+      walletAlias: wallet.alias,
+      walletAddress: wallet.address,
+      allocation: wallet.allocation ?? 100,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Check if a trade conflicts with recent signals from other traders
+   * Returns conflicting signals if any exist
+   */
+  private findConflictingSignals(trade: Trade, currentWallet: WalletConfig): RecentSignal[] {
+    this.cleanupOldSignals();
+
+    return this.recentSignals.filter(signal => {
+      // Must be same market
+      if (signal.market !== trade.conditionId) return false;
+
+      // Must be from a different wallet
+      if (signal.walletAddress.toLowerCase() === currentWallet.address.toLowerCase()) return false;
+
+      // Check for opposite trades:
+      // 1. BUY vs SELL on same outcome
+      // 2. BUY Yes vs BUY No (or SELL Yes vs SELL No) on same market
+      const isSameOutcome = signal.outcome === trade.outcome;
+      const isOppositeSide = signal.side !== trade.side;
+      const isOppositeOutcome = signal.outcome !== trade.outcome && signal.side === trade.side;
+
+      return (isSameOutcome && isOppositeSide) || isOppositeOutcome;
+    });
+  }
+
+  /**
+   * Resolve trade conflict using the configured strategy
+   * Returns: { shouldExecute: boolean, reason: string }
+   */
+  private resolveConflict(
+    trade: Trade,
+    currentWallet: WalletConfig,
+    conflictingSignals: RecentSignal[]
+  ): { shouldExecute: boolean; reason: string } {
+    const strategy = this.config.conflictStrategy;
+
+    // Create current signal for comparison
+    const currentSignal: RecentSignal = {
+      market: trade.conditionId,
+      side: trade.side,
+      outcome: trade.outcome,
+      walletAlias: currentWallet.alias,
+      walletAddress: currentWallet.address,
+      allocation: currentWallet.allocation ?? 100,
+      timestamp: Date.now(),
+    };
+
+    switch (strategy) {
+      case 'first':
+        // Follow the first signal received (current behavior)
+        // Since we're processing the current trade, the conflicting signals were first
+        return {
+          shouldExecute: false,
+          reason: `strategy 'first' - following earlier signal from ${conflictingSignals[0].walletAlias}`,
+        };
+
+      case 'skip':
+        // Skip all conflicting trades
+        return {
+          shouldExecute: false,
+          reason: `strategy 'skip' - conflict detected with ${conflictingSignals.map(s => s.walletAlias).join(', ')}`,
+        };
+
+      case 'majority': {
+        // Count votes for each side
+        // Group signals by their "vote" (combination of side + outcome)
+        const allSignals = [...conflictingSignals, currentSignal];
+        const votes: Record<string, string[]> = {};
+
+        for (const signal of allSignals) {
+          // Normalize the vote: BUY Yes = SELL No, BUY No = SELL Yes
+          // Convert to a canonical form: "bullish" (betting Yes wins) or "bearish" (betting No wins)
+          const isBullish = (signal.side === 'BUY' && signal.outcome === 'Yes') ||
+                          (signal.side === 'SELL' && signal.outcome === 'No');
+          const voteKey = isBullish ? 'bullish' : 'bearish';
+
+          if (!votes[voteKey]) votes[voteKey] = [];
+          votes[voteKey].push(signal.walletAlias);
+        }
+
+        const bullishCount = votes['bullish']?.length || 0;
+        const bearishCount = votes['bearish']?.length || 0;
+
+        // Determine if current signal aligns with majority
+        const currentIsBullish = (trade.side === 'BUY' && trade.outcome === 'Yes') ||
+                                (trade.side === 'SELL' && trade.outcome === 'No');
+        const currentVote = currentIsBullish ? 'bullish' : 'bearish';
+
+        if (bullishCount === bearishCount) {
+          return {
+            shouldExecute: false,
+            reason: `strategy 'majority' - tie vote (${bullishCount} bullish vs ${bearishCount} bearish), skipping`,
+          };
+        }
+
+        const majorityVote = bullishCount > bearishCount ? 'bullish' : 'bearish';
+        const majorityTraders = votes[majorityVote]?.join(', ') || '';
+
+        if (currentVote === majorityVote) {
+          return {
+            shouldExecute: true,
+            reason: `strategy 'majority' - current trade aligns with majority (${majorityTraders})`,
+          };
+        } else {
+          return {
+            shouldExecute: false,
+            reason: `strategy 'majority' - majority opposes (${majorityTraders})`,
+          };
+        }
+      }
+
+      case 'highest_allocation': {
+        // Follow the trader with highest allocation
+        const allSignals = [...conflictingSignals, currentSignal];
+
+        // Group by vote direction
+        const bullishSignals = allSignals.filter(s =>
+          (s.side === 'BUY' && s.outcome === 'Yes') || (s.side === 'SELL' && s.outcome === 'No')
+        );
+        const bearishSignals = allSignals.filter(s =>
+          (s.side === 'BUY' && s.outcome === 'No') || (s.side === 'SELL' && s.outcome === 'Yes')
+        );
+
+        // Find max allocation in each direction
+        const maxBullish = bullishSignals.length > 0
+          ? Math.max(...bullishSignals.map(s => s.allocation))
+          : 0;
+        const maxBearish = bearishSignals.length > 0
+          ? Math.max(...bearishSignals.map(s => s.allocation))
+          : 0;
+
+        // Check for tie
+        if (maxBullish === maxBearish) {
+          return {
+            shouldExecute: false,
+            reason: `strategy 'highest_allocation' - tie at ${maxBullish}% allocation, skipping`,
+          };
+        }
+
+        // Find which direction wins and who has the highest allocation
+        const winningDirection = maxBullish > maxBearish ? 'bullish' : 'bearish';
+        const winningSignals = winningDirection === 'bullish' ? bullishSignals : bearishSignals;
+        const winner = winningSignals.find(s => s.allocation === (winningDirection === 'bullish' ? maxBullish : maxBearish));
+
+        // Check if current signal is in the winning direction
+        const currentIsBullish = (trade.side === 'BUY' && trade.outcome === 'Yes') ||
+                                (trade.side === 'SELL' && trade.outcome === 'No');
+        const currentDirection = currentIsBullish ? 'bullish' : 'bearish';
+
+        if (currentDirection === winningDirection) {
+          return {
+            shouldExecute: true,
+            reason: `strategy 'highest_allocation' - following ${winner?.walletAlias} (${winner?.allocation}% allocation)`,
+          };
+        } else {
+          return {
+            shouldExecute: false,
+            reason: `strategy 'highest_allocation' - ${winner?.walletAlias} (${winner?.allocation}%) opposes`,
+          };
+        }
+      }
+
+      default:
+        return { shouldExecute: true, reason: 'unknown strategy, allowing trade' };
+    }
+  }
+
   private async handleTradeSignal(signal: TradeSignal, wallet: WalletConfig): Promise<void> {
     const trade = signal.trade;
     const tradePrice = parseFloat(String(trade.price));
@@ -267,6 +481,12 @@ export class CopyTradingBot {
     // Filter by market blacklist
     if (isMarketBlacklisted(trade.title, this.config.blacklistKeywords)) {
       console.log(`[Blacklist] Skipped ${wallet.alias}'s trade on "${trade.title}" (market blacklisted)`);
+      return;
+    }
+
+    // Buy-only mode: skip sell signals from tracked traders (internal exits like stop-loss still work)
+    if (trade.side === 'SELL' && !this.config.copySells) {
+      console.log(`[BuyOnly] Ignored ${wallet.alias}'s SELL signal on "${trade.title}" - buy-only mode enabled`);
       return;
     }
 
@@ -309,6 +529,29 @@ export class CopyTradingBot {
         return;
       }
     }
+
+    // Conflict detection (only if tracking more than 1 wallet and strategy is not 'first')
+    const enabledWallets = this.config.wallets.filter(w => w.enabled);
+    if (enabledWallets.length > 1 && this.config.conflictStrategy !== 'first') {
+      const conflictingSignals = this.findConflictingSignals(trade, wallet);
+
+      if (conflictingSignals.length > 0) {
+        console.log(`\n⚠️  [Conflict] ${wallet.alias}'s ${trade.side} ${trade.outcome} on "${trade.title}"`);
+        console.log(`    Conflicts with: ${conflictingSignals.map(s => `${s.walletAlias} (${s.side} ${s.outcome})`).join(', ')}`);
+
+        const resolution = this.resolveConflict(trade, wallet, conflictingSignals);
+        console.log(`    Resolution: ${resolution.reason}`);
+
+        if (!resolution.shouldExecute) {
+          // Still record the signal for future conflict detection
+          this.recordSignal(trade, wallet);
+          return;
+        }
+      }
+    }
+
+    // Record this signal for future conflict detection
+    this.recordSignal(trade, wallet);
 
     console.log('\n' + '='.repeat(50));
     console.log(`🚨 NEW TRADE SIGNAL from ${wallet.alias}`);
@@ -621,6 +864,13 @@ export class CopyTradingBot {
       console.log(`Trading: ⚪ DISABLED (monitor only)`);
     }
 
+    // Show copy mode (buy-only vs full)
+    if (this.config.copySells) {
+      console.log(`Copy Mode: Full (copying buys and sells)`);
+    } else {
+      console.log(`Copy Mode: Buy-Only (ignoring sell signals)`);
+    }
+
     console.log(`Polling: every ${this.config.pollingIntervalMs / 1000}s`);
     console.log(`Retry: max ${this.config.maxRetries} attempts, ${this.config.retryDelayMs}ms base delay`);
 
@@ -643,11 +893,23 @@ export class CopyTradingBot {
       console.log(`Daily P&L (${dailyPnLDate}): $${dailyPnL.toFixed(2)} (no limit)`);
     }
 
+    // Show conflict resolution strategy (only relevant when tracking multiple wallets)
+    if (enabledWallets.length > 1) {
+      console.log(`Conflict Strategy: ${this.config.conflictStrategy}`);
+    }
+
     // Show trailing stop status
     if (this.config.trailingStopPercent > 0) {
       console.log(`Trailing Stop: ${this.config.trailingStopPercent}% from peak (check every ${this.config.trailingStopCheckIntervalMs / 1000}s)`);
     } else {
       console.log(`Trailing Stop: disabled`);
+    }
+
+    // Show max hold time status
+    if (this.config.maxHoldTimeHours > 0) {
+      console.log(`Max Hold Time: ${this.config.maxHoldTimeHours}h`);
+    } else {
+      console.log(`Max Hold Time: none`);
     }
   }
 
@@ -675,6 +937,10 @@ export class CopyTradingBot {
 
     if (this.trailingStopMonitor) {
       this.trailingStopMonitor.stopMonitoring();
+    }
+
+    if (this.timeBasedExitMonitor) {
+      this.timeBasedExitMonitor.stopMonitoring();
     }
 
     // Stop health check server
