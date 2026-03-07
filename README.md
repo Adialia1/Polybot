@@ -1,6 +1,14 @@
 # Polybot - Polymarket Trade Copier
 
+[![CI](https://github.com/Adialia1/polybot/actions/workflows/ci.yml/badge.svg)](https://github.com/Adialia1/polybot/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Adialia1/polybot/actions/workflows/codeql.yml/badge.svg)](https://github.com/Adialia1/polybot/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue)](https://www.typescriptlang.org/)
+
 A sophisticated trade copying bot for Polymarket that tracks successful traders and automatically copies their trades.
+
+> ⚠️ **WARNING:** This bot involves real money and automated trading. **USE AT YOUR OWN RISK.** The authors are not responsible for any financial losses. Always start with `DRY_RUN=true` and test thoroughly before using real funds.
 
 ## Features
 
@@ -37,6 +45,7 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 
 ### Monitoring & Control
 - **Telegram Notifications** - Alerts for trades, stops, daily summaries
+- **Telegram Bot Commands** - Check status, positions, and stats via chat commands
 - **Health Check Endpoint** - HTTP endpoint for uptime monitoring
 - **Web Dashboard** - Browser UI with positions, trades, P&L, manual controls
 - **Config Hot-Reload** - Update settings without restarting
@@ -78,16 +87,24 @@ nano .env
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `TRACK_WALLETS` | Comma-separated wallet addresses to copy | Required |
-| `WALLET_ALIASES` | Comma-separated aliases for wallets | `Trader1,Trader2,...` |
-| `WALLET_ALLOCATIONS` | Comma-separated allocation percentages | `100` for each |
+| `TRACK_WALLETS` | JSON array of wallet objects to track | Required |
 
-**Example:**
+**Format:**
 ```bash
-TRACK_WALLETS=0x2005d16a84ceefa912d4e380cd32e7ff827875ea,0xabc123...
-WALLET_ALIASES=RN1,tripping
-WALLET_ALLOCATIONS=60,40
+TRACK_WALLETS=[{"address":"0xWallet1","alias":"Trader1","enabled":true,"allocation":60},{"address":"0xWallet2","alias":"Trader2","enabled":true,"allocation":40}]
 ```
+
+**Example (Single Trader):**
+```bash
+TRACK_WALLETS=[{"address":"0x2005d16a84ceefa912d4e380cd32e7ff827875ea","alias":"RN1","enabled":true,"allocation":100}]
+```
+
+**Example (Multiple Traders):**
+```bash
+TRACK_WALLETS=[{"address":"0x2005d16a...","alias":"RN1","enabled":true,"allocation":50},{"address":"0xabc123...","alias":"Trader2","enabled":true,"allocation":50}]
+```
+
+**Note:** Allocation percentages should sum to 100.
 
 ### Position Sizing
 
@@ -158,6 +175,12 @@ WHITELIST_KEYWORDS=Bitcoin,Trump,Election
 1. Message @BotFather on Telegram, create a bot, get the token
 2. Message @userinfobot to get your chat ID
 3. Add both to your `.env`
+
+**Available Commands:**
+- `/status` - Check if bot is active and uptime
+- `/positions` - Show all open positions
+- `/stats` - Show trading statistics (trades, success rate, volume)
+- `/help` - Show available commands
 
 ### Health Check Endpoint
 
@@ -230,6 +253,16 @@ See `data/config.example.json` for a complete template.
 
 ### Start the Bot
 
+**Using convenience scripts (macOS/Linux):**
+```bash
+# Start with caffeinate (prevents Mac from sleeping)
+./start.sh
+
+# Stop the bot
+./stop.sh
+```
+
+**Using npm:**
 ```bash
 # Development (with hot-reload)
 npm run bot
@@ -238,6 +271,8 @@ npm run bot
 npm run build
 npm start
 ```
+
+**Note:** The `start.sh` script uses `caffeinate` to keep your Mac awake while the bot runs.
 
 ### Other Commands
 
@@ -280,9 +315,7 @@ POLY_API_SECRET=your-api-secret
 POLY_PASSPHRASE=your-passphrase
 
 # === WALLETS TO TRACK ===
-TRACK_WALLETS=0x2005d16a84ceefa912d4e380cd32e7ff827875ea
-WALLET_ALIASES=RN1
-WALLET_ALLOCATIONS=100
+TRACK_WALLETS=[{"address":"0x2005d16a84ceefa912d4e380cd32e7ff827875ea","alias":"RN1","enabled":true,"allocation":100}]
 
 # === POSITION SIZING ===
 USER_ACCOUNT_SIZE=100
@@ -425,4 +458,17 @@ State survives crashes and restarts.
 
 ## License
 
-ISC
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Disclaimer
+
+**USE AT YOUR OWN RISK.** This bot involves real money and automated trading. The authors are not responsible for any financial losses. Always start with `DRY_RUN=true` and small amounts.
+
+## Contributing
+
+Contributions welcome! Please open an issue or PR.
+
+## Support
+
+- **Issues:** [GitHub Issues](https://github.com/Adialia1/polybot/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/Adialia1/polybot/discussions)

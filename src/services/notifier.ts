@@ -53,23 +53,126 @@ export class TelegramNotifier {
   private bot: TelegramBot | null = null;
   private chatId: string | null = null;
   private enabled: boolean = false;
+  private stateManager: StateManager | null = null;
+  private startTime: number = Date.now();
 
-  constructor() {
+  constructor(stateManager?: StateManager) {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const chatId = process.env.TELEGRAM_CHAT_ID;
 
+    if (stateManager) {
+      this.stateManager = stateManager;
+    }
+
     if (token && chatId) {
       try {
-        this.bot = new TelegramBot(token, { polling: false });
+        this.bot = new TelegramBot(token, { polling: true });
         this.chatId = chatId;
         this.enabled = true;
-        console.log('[Notifier] Telegram notifications enabled');
+        this.setupCommands();
+        console.log('[Notifier] Telegram notifications enabled with command support');
       } catch (error) {
         console.warn('[Notifier] Failed to initialize Telegram bot:', error);
         this.enabled = false;
       }
     } else {
       console.log('[Notifier] Telegram notifications disabled (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set)');
+    }
+  }
+
+  /**
+   * Setup command handlers
+   */
+  private setupCommands(): void {
+    if (!this.bot) return;
+
+    // /status - Check if bot is active
+    this.bot.onText(/\/status/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId) return;
+
+      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+      const hours = Math.floor(uptime / 3600);
+      const minutes = Math.floor((uptime % 3600) / 60);
+      const seconds = uptime % 60;
+
+      const message = `
+✅ <b>Bot Status: ACTIVE</b>
+
+<b>Uptime:</b> ${hours}h ${minutes}m ${seconds}s
+<b>Started:</b> ${new Date(this.startTime).toLocaleString()}
+      `.trim();
+
+      await this.sendMessage(message);
+    });
+
+    // /positions - Show current positions
+    this.bot.onText(/\/positions/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId || !this.stateManager) return;
+
+      const positions = this.stateManager.getAllPositions();
+
+      if (positions.length === 0) {
+        await this.sendMessage('📊 <b>No open positions</b>');
+        return;
+      }
+
+      let message = '📊 <b>Open Positions</b>\n\n';
+      positions.forEach((pos, i) => {
+        message += `${i + 1}. <b>${pos.outcome}</b>\n`;
+        message += `   Market: ${pos.title}\n`;
+        message += `   Size: ${pos.size.toFixed(4)} shares @ $${pos.avgPrice.toFixed(3)}\n`;
+        message += `   Value: $${(pos.size * pos.avgPrice).toFixed(2)}\n\n`;
+      });
+
+      await this.sendMessage(message);
+    });
+
+    // /stats - Show trading statistics
+    this.bot.onText(/\/stats/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId || !this.stateManager) return;
+
+      const stats = this.stateManager.getStats();
+      const successRate = stats.totalTrades > 0
+        ? ((stats.successfulTrades / stats.totalTrades) * 100).toFixed(1)
+        : '0.0';
+
+      const message = `
+📈 <b>Trading Statistics</b>
+
+<b>Total Trades:</b> ${stats.totalTrades}
+<b>Successful:</b> ${stats.successfulTrades}
+<b>Failed:</b> ${stats.failedTrades}
+<b>Success Rate:</b> ${successRate}%
+<b>Total Volume:</b> $${stats.totalVolume.toFixed(2)}
+      `.trim();
+
+      await this.sendMessage(message);
+    });
+
+    // /help - Show available commands
+    this.bot.onText(/\/help/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId) return;
+
+      const message = `
+🤖 <b>Available Commands</b>
+
+/status - Check if bot is active
+/positions - Show open positions
+/stats - Show trading statistics
+/help - Show this help message
+      `.trim();
+
+      await this.sendMessage(message);
+    });
+  }
+
+  /**
+   * Stop polling (cleanup)
+   */
+  async stopPolling(): Promise<void> {
+    if (this.bot) {
+      await this.bot.stopPolling();
+      console.log('[Notifier] Telegram polling stopped');
     }
   }
 

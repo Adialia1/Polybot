@@ -1,0 +1,6 @@
+{
+  "trailingStopPercent": 20,
+  "dailyLossLimit": 25,
+  "blacklistKeywords": ["NBA", "NFL", "soccer"],
+  "whitelistKeywords": []
+}

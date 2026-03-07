@@ -7,26 +7,42 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "bot": "tsx src/bot.ts",
     "positions": "tsx src/index.ts positions",
     "trades": "tsx src/index.ts trades",
+    "status": "tsx src/scripts/status.ts",
     "check-balance": "tsx src/index.ts check-balance",
     "find-market": "tsx src/scripts/findMarket.ts",
     "test-trade": "tsx src/scripts/testTrade.ts",
     "approve": "tsx src/scripts/approve.ts",
     "quick-test": "tsx src/scripts/quickTest.ts",
     "sell": "tsx src/scripts/sellPosition.ts",
-    "bot": "tsx src/bot.ts",
-    "status": "tsx src/scripts/status.ts"
+    "lint": "tsc --noEmit",
+    "security-check": "npm audit",
+    "release:major": "./scripts/release.sh major",
+    "release:minor": "./scripts/release.sh minor",
+    "release:patch": "./scripts/release.sh patch",
+    "prepare": "npm run build"
   },
   "keywords": [
     "polymarket",
     "trading",
     "bot",
-    "copy-trading"
+    "copy-trading",
+    "prediction-markets",
+    "automated-trading"
   ],
   "author": "",
-  "license": "ISC",
-  "description": "Polymarket trade copier bot",
+  "license": "MIT",
+  "description": "Automated trade copying bot for Polymarket with risk management, multi-trader support, and Telegram notifications",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Adialia1/polybot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Adialia1/polybot/issues"
+  },
+  "homepage": "https://github.com/Adialia1/polybot#readme",
   "dependencies": {
     "@polymarket/clob-client": "5.7.0",
     "@scure/bip32": "2.0.1",

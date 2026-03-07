@@ -46,11 +46,11 @@ export class CopyTradingBot {
   constructor() {
     this.clobApi = new ClobApiClient();
 
-    // Initialize Telegram notifier
-    this.notifier = new TelegramNotifier();
-
     // Initialize state manager (loads persisted state)
     this.stateManager = new StateManager();
+
+    // Initialize Telegram notifier with state manager for commands
+    this.notifier = new TelegramNotifier(this.stateManager);
 
     this.positionSizer = new PositionSizer({
       userAccountSize: this.config.userAccountSize,
@@ -1169,6 +1169,9 @@ export class CopyTradingBot {
     // Send Telegram notification that bot stopped
     const stats = this.stateManager.getStats();
     await this.notifier.notifyBotStopped(stats);
+
+    // Stop Telegram polling
+    await this.notifier.stopPolling();
 
     // Save state before exit
     this.stateManager.stopAutoSave();
