@@ -428,8 +428,13 @@ export class StateManager {
     const position = this.state.positions[asset];
     if (!position) return false;
 
-    // Always track the highest price reached (even before profit)
-    // This allows trailing stop to activate as soon as price rises then drops
+    // Only track highest price when position is in profit
+    // This prevents trailing stop from triggering on normal spread/volatility
+    // or on resolved markets with $0.01 bids
+    if (currentPrice <= position.avgPrice) {
+      return false;
+    }
+
     const existingHighest = position.highestPrice || position.avgPrice;
     if (currentPrice > existingHighest) {
       position.highestPrice = currentPrice;
@@ -456,8 +461,9 @@ export class StateManager {
 
     const highestPrice = position.highestPrice;
 
-    // Need a highestPrice to calculate drop from
-    if (!highestPrice || highestPrice <= 0) {
+    // Only trigger trailing stop if position was in profit at some point
+    // (highestPrice is only set when price exceeds avgPrice)
+    if (!highestPrice || highestPrice <= position.avgPrice) {
       return { triggered: false };
     }
 

@@ -228,7 +228,7 @@ export class CopyTradingBot {
       // Initialize position watchdog (runs every 60s, validates all positions)
       this.watchdog = new PositionWatchdog(
         {
-          checkIntervalMs: 60_000, // Every 1 minute
+          checkIntervalMs: 10_000, // Every 10 seconds
           stopLossPercent: this.config.stopLossPercent,
           takeProfitPercent: this.config.takeProfitPercent,
         },

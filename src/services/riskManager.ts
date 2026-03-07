@@ -145,7 +145,8 @@ export class RiskManager {
         const mid = ((parseFloat(spread.bid) + parseFloat(spread.ask)) / 2).toString();
         const currentPrice = parseFloat(mid || spread.bid || '0');
 
-        if (currentPrice === 0 || position.avgPrice === 0) continue;
+        // Skip resolved markets or empty orderbooks ($0.01-0.02)
+        if (currentPrice <= 0.02 || position.avgPrice === 0) continue;
 
         // Calculate P&L %
         const pnlPercent = ((currentPrice - position.avgPrice) / position.avgPrice) * 100;

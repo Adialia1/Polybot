@@ -51,8 +51,8 @@ export class PositionWatchdog {
 
     this.interval = setInterval(() => this.runCheck(), this.config.checkIntervalMs);
 
-    // First check after 30s (let other systems initialize first)
-    setTimeout(() => this.runCheck(), 30_000);
+    // First check after 15s (let other systems initialize first)
+    setTimeout(() => this.runCheck(), 15_000);
   }
 
   stop(): void {
@@ -162,7 +162,8 @@ export class PositionWatchdog {
     try {
       const spread = await this.clobApi.getSpread(pos.asset);
       const mid = (parseFloat(spread.bid) + parseFloat(spread.ask)) / 2;
-      if (mid > 0 && pos.avgPrice > 0) {
+      // Skip resolved markets / empty orderbooks
+      if (mid > 0.02 && pos.avgPrice > 0) {
         const pnl = ((mid - pos.avgPrice) / pos.avgPrice) * 100;
 
         // If SL should have triggered but somehow didn't, log it as urgent

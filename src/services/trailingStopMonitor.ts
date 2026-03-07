@@ -195,16 +195,20 @@ export class TrailingStopMonitor extends EventEmitter {
 
       for (const position of positions) {
         try {
-          // Try WebSocket price first (real-time), fall back to REST API
+          // Try WebSocket price first (real-time), fall back to REST API midpoint
           let currentPrice = this.latestPrices.get(position.asset) || 0;
 
           if (currentPrice === 0) {
-            // Fall back to REST API - use bid as it's what we'd get when selling
+            // Fall back to REST API - use midpoint for more stable price
+            // (raw bid can be $0.01 on thin/resolved markets)
             const spread = await this.clobApi.getSpread(position.asset);
-            currentPrice = parseFloat(spread.bid || '0');
+            const bid = parseFloat(spread.bid || '0');
+            const ask = parseFloat(spread.ask || '0');
+            currentPrice = bid > 0 && ask > 0 ? (bid + ask) / 2 : bid;
           }
 
-          if (currentPrice === 0 || position.avgPrice === 0) continue;
+          // Skip if price is effectively zero (resolved market or empty orderbook)
+          if (currentPrice <= 0.02 || position.avgPrice === 0) continue;
 
           // Update highest price if applicable
           const wasUpdated = this.stateManager.updateHighestPrice(position.asset, currentPrice);
