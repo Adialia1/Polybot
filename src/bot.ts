@@ -182,7 +182,7 @@ export class CopyTradingBot {
           stopLossPercent: -25,    // Sell if position drops 25%
           takeProfitPercent: 100,  // Sell if position doubles
           maxTradeAgeSeconds: 60,  // Skip trades older than 1 minute
-          maxSpreadPercent: 0.10,  // Skip if spread > 10%
+          maxPriceDiffPercent: parseFloat(process.env.MAX_PRICE_DIFF_PERCENT || '5'),  // Skip if price moved >5% from trader
         },
         this.stateManager,
         this.trader,
@@ -594,9 +594,9 @@ export class CopyTradingBot {
       return;
     }
 
-    // Risk checks (stale trade, wide spread)
+    // Risk checks (stale trade, price slippage)
     if (this.riskManager) {
-      const riskCheck = await this.riskManager.checkTradeSignal(trade.timestamp, trade.asset);
+      const riskCheck = await this.riskManager.checkTradeSignal(trade.timestamp, trade.asset, parseFloat(String(trade.price)), trade.side as 'BUY' | 'SELL');
       if (!riskCheck.passed) {
         console.log(`[Risk] Skipped ${wallet.alias}'s trade: ${riskCheck.reason}`);
         return;

@@ -13,8 +13,8 @@ export interface RiskConfig {
   // Maximum age of trade signal to copy (in seconds)
   maxTradeAgeSeconds?: number;
 
-  // Maximum spread to accept (e.g., 0.05 = 5%)
-  maxSpreadPercent?: number;
+  // Maximum price difference from trader's entry to accept (e.g., 5 = 5%)
+  maxPriceDiffPercent?: number;
 
   // How often to check positions for stop loss/take profit (ms)
   checkIntervalMs?: number;
@@ -45,7 +45,7 @@ export class RiskManager {
       stopLossPercent: config.stopLossPercent ?? -25, // Default: -25%
       takeProfitPercent: config.takeProfitPercent ?? 100, // Default: +100%
       maxTradeAgeSeconds: config.maxTradeAgeSeconds ?? 60, // Default: 1 minute
-      maxSpreadPercent: config.maxSpreadPercent ?? 0.10, // Default: 10%
+      maxPriceDiffPercent: config.maxPriceDiffPercent ?? 5, // Default: 5%
       checkIntervalMs: config.checkIntervalMs ?? 60000, // Default: every minute
     };
     this.stateManager = stateManager;
@@ -60,7 +60,9 @@ export class RiskManager {
    */
   async checkTradeSignal(
     tradeTimestamp: number,
-    tokenId: string
+    tokenId: string,
+    traderPrice: number,
+    side: 'BUY' | 'SELL'
   ): Promise<RiskCheckResult> {
     // Check trade age
     const ageSeconds = (Date.now() / 1000) - tradeTimestamp;
@@ -71,20 +73,22 @@ export class RiskManager {
       };
     }
 
-    // Check spread
+    // Check price difference from trader's entry
     try {
-      const spread = await this.clobApi.getSpread(tokenId);
-      const spreadPercent = parseFloat(spread.spread) / parseFloat(spread.mid || '1');
+      const currentPrice = parseFloat(await this.clobApi.getPrice(tokenId, side));
+      if (traderPrice > 0 && currentPrice > 0) {
+        const priceDiffPercent = Math.abs(currentPrice - traderPrice) / traderPrice * 100;
 
-      if (spreadPercent > this.config.maxSpreadPercent!) {
-        return {
-          passed: false,
-          reason: `Spread too wide (${(spreadPercent * 100).toFixed(1)}% > ${(this.config.maxSpreadPercent! * 100).toFixed(0)}% max)`,
-        };
+        if (priceDiffPercent > this.config.maxPriceDiffPercent!) {
+          return {
+            passed: false,
+            reason: `Price moved too far from trader (${priceDiffPercent.toFixed(1)}% diff > ${this.config.maxPriceDiffPercent}% max | trader: $${traderPrice.toFixed(3)}, current: $${currentPrice.toFixed(3)})`,
+          };
+        }
       }
     } catch (error) {
-      // If we can't check spread, allow the trade
-      console.warn('[RiskManager] Could not check spread:', error);
+      // If we can't check price, allow the trade
+      console.warn('[RiskManager] Could not check price:', error);
     }
 
     return { passed: true };
@@ -100,7 +104,7 @@ export class RiskManager {
     console.log(`  Stop Loss: ${this.config.stopLossPercent}%`);
     console.log(`  Take Profit: +${this.config.takeProfitPercent}%`);
     console.log(`  Max Trade Age: ${this.config.maxTradeAgeSeconds}s`);
-    console.log(`  Max Spread: ${(this.config.maxSpreadPercent! * 100).toFixed(0)}%`);
+    console.log(`  Max Price Diff: ${this.config.maxPriceDiffPercent}%`);
 
     this.checkInterval = setInterval(() => {
       this.checkPositions();
@@ -126,7 +130,8 @@ export class RiskManager {
       try {
         // Get current price
         const spread = await this.clobApi.getSpread(position.asset);
-        const currentPrice = parseFloat(spread.mid || spread.bid || '0');
+        const mid = ((parseFloat(spread.bid) + parseFloat(spread.ask)) / 2).toString();
+        const currentPrice = parseFloat(mid || spread.bid || '0');
 
         if (currentPrice === 0 || position.avgPrice === 0) continue;
 
