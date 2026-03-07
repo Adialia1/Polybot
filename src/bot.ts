@@ -22,6 +22,8 @@ import { TradeSignal, WalletConfig, Trade, RecentSignal, CopyConfig } from './ty
 
 // Conflict resolution timeout (5 minutes in milliseconds)
 const CONFLICT_WINDOW_MS = 5 * 60 * 1000;
+// Dedup window: ignore duplicate BUY signals for same asset within this period
+const DEDUP_WINDOW_MS = 30 * 1000;
 
 export class CopyTradingBot {
   private config = loadConfig();
@@ -45,6 +47,8 @@ export class CopyTradingBot {
   private isPaused = false;
   // Recent signals for conflict detection (in-memory, not persisted)
   private recentSignals: RecentSignal[] = [];
+  // Dedup map: asset -> last processed timestamp (prevents burst duplicates)
+  private recentBuyDedup: Map<string, number> = new Map();
 
   constructor() {
     this.clobApi = new ClobApiClient();
@@ -257,6 +261,17 @@ export class CopyTradingBot {
     // Start order queue
     this.orderQueue.start();
 
+    // Pre-fetch trader profiles to avoid 429 burst on first trade signals
+    console.log('\nPre-fetching trader profiles...');
+    for (const wallet of this.config.wallets.filter(w => w.enabled)) {
+      try {
+        await this.positionSizer.getTraderProfile(wallet.address);
+        console.log(`  [Sizer] Cached profile for ${wallet.alias}`);
+      } catch (err: any) {
+        console.warn(`  [Sizer] Failed to pre-fetch ${wallet.alias}: ${err?.message}`);
+      }
+    }
+
     // Start monitoring
     console.log('\nStarting trade monitor...');
     await this.monitor.start();
@@ -315,6 +330,12 @@ export class CopyTradingBot {
           },
           onForceSell: async (asset: string) => {
             return this.forceSellPosition(asset);
+          },
+          onSellAll: async () => {
+            return this.sellAllPositions();
+          },
+          onCancelAllOrders: async () => {
+            return this.cancelAllOpenOrders();
           },
         }
       );
@@ -660,6 +681,27 @@ export class CopyTradingBot {
       }
     }
 
+    // Dedup: skip duplicate BUY signals for same asset within 30s window
+    if (trade.side === 'BUY') {
+      const lastProcessed = this.recentBuyDedup.get(trade.asset);
+      if (lastProcessed && Date.now() - lastProcessed < DEDUP_WINDOW_MS) {
+        console.log(`[Dedup] Skipped duplicate BUY on "${trade.title}" (last processed ${((Date.now() - lastProcessed) / 1000).toFixed(1)}s ago)`);
+        return;
+      }
+    }
+
+    // Check per-position cap: skip BUY if we already have maxPositionSize worth in this asset
+    if (trade.side === 'BUY' && this.config.maxPositionSize > 0) {
+      const existingPosition = this.stateManager.getPosition(trade.asset);
+      if (existingPosition) {
+        const currentValue = existingPosition.size * existingPosition.avgPrice;
+        if (currentValue >= this.config.maxPositionSize) {
+          console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - position already $${currentValue.toFixed(2)} (max: $${this.config.maxPositionSize})`);
+          return;
+        }
+      }
+    }
+
     // For SELL orders, check if we have the position
     if (trade.side === 'SELL') {
       const hasPosition = this.stateManager.hasPosition(trade.asset);
@@ -772,6 +814,10 @@ export class CopyTradingBot {
 
     // Queue the order
     if (this.config.enableTrading && finalSize > 0) {
+      // Mark asset as recently processed to prevent burst duplicates
+      if (trade.side === 'BUY') {
+        this.recentBuyDedup.set(trade.asset, Date.now());
+      }
       this.orderQueue.enqueue(trade, wallet.alias, wallet.address, finalSize);
       console.log(`\n📋 Order queued`);
     } else if (!this.config.enableTrading) {
@@ -1036,6 +1082,12 @@ export class CopyTradingBot {
       return;
     }
 
+    // Skip if position too small for Polymarket minimum order size (5 shares)
+    if (shares < 5) {
+      console.log(`  TP skipped: ${shares.toFixed(2)} shares below Polymarket minimum (5)`);
+      return;
+    }
+
     console.log(`\n🛡️ Placing take profit order for ${title}:`);
     console.log(`  Entry: $${entryPrice.toFixed(2)} | Shares: ${shares.toFixed(2)}`);
     console.log(`  Take Profit: SELL @ $${takeProfitPrice.toFixed(2)} (+${(tpPercent * 100).toFixed(0)}%)`);
@@ -1043,21 +1095,31 @@ export class CopyTradingBot {
 
     let tpOrderId: string | undefined;
 
-    // Update balance allowance (required after buying before placing GTC sell orders)
-    await this.trader.updateBalanceAllowance();
+    // Update balance allowance for this specific token (required for GTC sell orders)
+    // Retry with delay — the exchange needs time to register the allowance after a buy
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await this.trader.updateBalanceAllowance(asset);
+      // Wait for allowance to propagate (longer on first attempt after buy)
+      await this.delay(attempt === 0 ? 2000 : 1000);
 
-    // Place take profit limit order
-    try {
-      const tpResult = await this.trader.placeLimitOrder(asset, 'SELL', shares, takeProfitPrice);
-      if (tpResult.success && tpResult.orderId) {
-        tpOrderId = tpResult.orderId;
-        console.log(`  ✅ Take Profit order placed: ${tpOrderId}`);
-      } else {
-        console.log(`  ⚠️ Take Profit order failed: ${tpResult.error}`);
+      try {
+        const tpResult = await this.trader.placeLimitOrder(asset, 'SELL', shares, takeProfitPrice);
+        if (tpResult.success && tpResult.orderId) {
+          tpOrderId = tpResult.orderId;
+          console.log(`  ✅ Take Profit order placed: ${tpOrderId}`);
+          break;
+        } else if (tpResult.error?.includes('not enough balance')) {
+          console.log(`  ⚠️ TP attempt ${attempt + 1}/3: allowance not ready yet, retrying...`);
+          continue;
+        } else {
+          console.log(`  ⚠️ Take Profit order failed: ${tpResult.error}`);
+          break;
+        }
+      } catch (err: any) {
+        errorLogger.logError('Bot.placeTP', err, { asset: asset?.slice(0, 30), entryPrice, shares });
+        console.error(`  ⚠️ Take Profit order error: ${err?.message}`);
+        break;
       }
-    } catch (err: any) {
-      errorLogger.logError('Bot.placeTP', err, { asset: asset?.slice(0, 30), entryPrice, shares });
-      console.error(`  ⚠️ Take Profit order error: ${err?.message}`);
     }
 
     // Save order ID to state so we can cancel it later
@@ -1089,24 +1151,38 @@ export class CopyTradingBot {
 
     console.log(`[Startup] Placing TP orders for ${missing.length}/${positions.length} positions...`);
 
-    // Update balance allowance once before placing all orders
-    await this.trader.updateBalanceAllowance();
-
     let placed = 0;
     for (const pos of missing) {
+      if (!this.isRunning && placed > 0) break; // Stop if shutting down
       try {
+        // Skip positions too small for Polymarket minimum (5 shares)
+        if (pos.size < 5) continue;
+
         const tpPercent = this.config.takeProfitPercent / 100;
         const takeProfitPrice = Math.min(0.99, Math.round((pos.avgPrice * (1 + tpPercent)) * 100) / 100);
 
         if (takeProfitPrice <= pos.avgPrice) continue;
 
-        const tpResult = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
-        if (tpResult.success && tpResult.orderId) {
-          this.stateManager.setProtectionOrders(pos.asset, undefined, tpResult.orderId);
-          placed++;
-          console.log(`  TP placed: ${pos.title?.slice(0, 40)} | SELL @ $${takeProfitPrice} (${pos.size.toFixed(2)} shares)`);
-        } else {
-          console.log(`  TP failed: ${pos.title?.slice(0, 40)} | ${tpResult.error}`);
+        // Update balance allowance and retry with delay
+        let tpPlaced = false;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          await this.trader.updateBalanceAllowance(pos.asset);
+          await this.delay(2000);
+
+          const tpResult = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
+          if (tpResult.success && tpResult.orderId) {
+            this.stateManager.setProtectionOrders(pos.asset, undefined, tpResult.orderId);
+            placed++;
+            tpPlaced = true;
+            console.log(`  TP placed: ${pos.title?.slice(0, 40)} | SELL @ $${takeProfitPrice} (${pos.size.toFixed(2)} shares)`);
+            break;
+          } else if (tpResult.error?.includes('not enough balance')) {
+            console.log(`  TP retry ${attempt + 1}: ${pos.title?.slice(0, 40)} | allowance not ready`);
+            continue;
+          } else {
+            console.log(`  TP failed: ${pos.title?.slice(0, 40)} | ${tpResult.error}`);
+            break;
+          }
         }
       } catch (err: any) {
         console.log(`  TP error: ${pos.title?.slice(0, 40)} | ${err?.message}`);
@@ -1220,6 +1296,86 @@ export class CopyTradingBot {
       errorLogger.logError('Bot.forceSell', err, { asset: asset?.slice(0, 30) });
       console.error('[Dashboard] Force sell failed:', err);
       return { success: false, error: err.message || 'Unknown error' };
+    }
+  }
+
+  /**
+   * Sell all open positions (called from dashboard)
+   */
+  private async sellAllPositions(): Promise<{ success: boolean; sold: number; failed: number; errors: string[] }> {
+    const positions = this.stateManager.getAllPositions().filter(p => p.size > 0.001);
+    if (positions.length === 0) {
+      return { success: true, sold: 0, failed: 0, errors: [] };
+    }
+
+    if (!this.trader) {
+      return { success: false, sold: 0, failed: positions.length, errors: ['Trader not initialized'] };
+    }
+
+    console.log(`\n[Dashboard] Selling ALL ${positions.length} positions...`);
+
+    // Cancel all open orders first (TP orders etc)
+    try {
+      await this.trader.cancelAllOrders();
+      // Clear all protection order IDs
+      for (const pos of positions) {
+        this.stateManager.clearProtectionOrders(pos.asset);
+      }
+    } catch (err: any) {
+      console.warn('[Dashboard] Failed to cancel orders before sell-all:', err?.message);
+    }
+
+    let sold = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const pos of positions) {
+      try {
+        const result = await this.forceSellPosition(pos.asset);
+        if (result.success) {
+          sold++;
+        } else {
+          failed++;
+          errors.push(`${pos.title?.slice(0, 30)}: ${result.error}`);
+        }
+      } catch (err: any) {
+        failed++;
+        errors.push(`${pos.title?.slice(0, 30)}: ${err?.message}`);
+      }
+    }
+
+    console.log(`[Dashboard] Sell All complete: ${sold} sold, ${failed} failed`);
+
+    if (this.notifier) {
+      await this.notifier.notify(
+        `<b>Sell All:</b> ${sold} sold, ${failed} failed out of ${positions.length} positions`
+      );
+    }
+
+    return { success: true, sold, failed, errors };
+  }
+
+  /**
+   * Cancel all open orders on the exchange (called from dashboard)
+   */
+  private async cancelAllOpenOrders(): Promise<{ success: boolean; message: string }> {
+    if (!this.trader) {
+      return { success: false, message: 'Trader not initialized' };
+    }
+
+    try {
+      await this.trader.cancelAllOrders();
+
+      // Clear all protection order IDs from state
+      const positions = this.stateManager.getAllPositions();
+      for (const pos of positions) {
+        this.stateManager.clearProtectionOrders(pos.asset);
+      }
+
+      console.log('[Dashboard] All orders cancelled');
+      return { success: true, message: 'All open orders cancelled' };
+    } catch (err: any) {
+      return { success: false, message: err?.message || 'Failed to cancel orders' };
     }
   }
 

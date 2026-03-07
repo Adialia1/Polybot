@@ -1,5 +1,5 @@
 import { ClobClient } from '@polymarket/clob-client';
-import { Side, OrderType } from '@polymarket/clob-client';
+import { Side, OrderType, AssetType } from '@polymarket/clob-client';
 import type { CreateOrderOptions, TickSize } from '@polymarket/clob-client';
 import { createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -220,10 +220,27 @@ export class Trader {
 
     console.log(`[Trader] BUY order submitted:`, JSON.stringify(result));
 
+    // Check if the order actually succeeded
+    const resultAny = result as any;
+    if (resultAny?.error || resultAny?.status === 400) {
+      return {
+        success: false,
+        error: resultAny.error || 'Order rejected by exchange',
+      };
+    }
+
+    // Check for successful response indicators
+    if (!resultAny?.orderID && !resultAny?.id && resultAny?.success !== true) {
+      return {
+        success: false,
+        error: 'No order ID returned - order may not have been placed',
+      };
+    }
+
     const size = amount / price;
     return {
       success: true,
-      orderId: result?.orderID || result?.id,
+      orderId: resultAny?.orderID || resultAny?.id,
       details: {
         market: title,
         side: 'BUY',
@@ -260,9 +277,25 @@ export class Trader {
 
     console.log(`[Trader] SELL order submitted:`, JSON.stringify(result));
 
+    // Check if the order actually succeeded
+    const resultAny = result as any;
+    if (resultAny?.error || resultAny?.status === 400) {
+      return {
+        success: false,
+        error: resultAny.error || 'Order rejected by exchange',
+      };
+    }
+
+    if (!resultAny?.orderID && !resultAny?.id && resultAny?.success !== true) {
+      return {
+        success: false,
+        error: 'No order ID returned - order may not have been placed',
+      };
+    }
+
     return {
       success: true,
-      orderId: result?.orderID || result?.id,
+      orderId: resultAny?.orderID || resultAny?.id,
       details: {
         market: title,
         side: 'SELL',
@@ -323,11 +356,16 @@ export class Trader {
    * Must be called after buying before placing GTC sell limit orders,
    * otherwise Polymarket rejects with "not enough balance / allowance".
    */
-  async updateBalanceAllowance(): Promise<void> {
+  async updateBalanceAllowance(tokenId?: string): Promise<void> {
     if (!this.client || this.config.dryRun) return;
 
     try {
-      await this.client.updateBalanceAllowance();
+      // For conditional tokens (ERC1155), must pass the specific token_id
+      const params: any = { asset_type: AssetType.CONDITIONAL };
+      if (tokenId) {
+        params.token_id = tokenId;
+      }
+      await this.client.updateBalanceAllowance(params);
       console.log('[Trader] Balance allowance updated');
     } catch (error: any) {
       console.warn('[Trader] Balance allowance update failed:', error?.message);
@@ -367,9 +405,25 @@ export class Trader {
         OrderType.GTC, // Good til cancelled
       );
 
+      // Check if the order actually succeeded
+      const resultAny = result as any;
+      if (resultAny?.error || resultAny?.status === 400) {
+        return {
+          success: false,
+          error: resultAny.error || 'Order rejected by exchange',
+        };
+      }
+
+      if (!resultAny?.orderID && !resultAny?.id && resultAny?.success !== true) {
+        return {
+          success: false,
+          error: 'No order ID returned',
+        };
+      }
+
       return {
         success: true,
-        orderId: result?.orderID || result?.id,
+        orderId: resultAny?.orderID || resultAny?.id,
         details: { market: tokenId, side, size, price },
       };
     } catch (error: any) {

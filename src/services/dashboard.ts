@@ -30,6 +30,8 @@ export interface DashboardCallbacks {
   onPause: () => void;
   onResume: () => void;
   onForceSell: (asset: string) => Promise<{ success: boolean; error?: string }>;
+  onSellAll: () => Promise<{ success: boolean; sold: number; failed: number; errors: string[] }>;
+  onCancelAllOrders: () => Promise<{ success: boolean; message: string }>;
 }
 
 export class DashboardServer {
@@ -177,6 +179,14 @@ export class DashboardServer {
       }
       if (path === '/api/resume') {
         this.handleResume(res);
+        return;
+      }
+      if (path === '/api/sell-all') {
+        await this.handleSellAll(res);
+        return;
+      }
+      if (path === '/api/cancel-all-orders') {
+        await this.handleCancelAllOrders(res);
         return;
       }
       if (path.startsWith('/api/sell/')) {
@@ -399,6 +409,40 @@ export class DashboardServer {
       }
     } catch (err: any) {
       this.sendError(res, 500, err.message || 'Failed to sell position');
+    }
+  }
+
+  /**
+   * POST /api/sell-all - Sell all open positions
+   */
+  private async handleSellAll(res: ServerResponse): Promise<void> {
+    const positions = this.config.stateManager.getAllPositions().filter(p => p.size > 0.001);
+    if (positions.length === 0) {
+      this.sendJson(res, 200, { success: true, sold: 0, failed: 0, errors: [], message: 'No positions to sell' });
+      return;
+    }
+
+    console.log(`[Dashboard] Sell All requested for ${positions.length} positions`);
+
+    try {
+      const result = await this.callbacks.onSellAll();
+      this.sendJson(res, 200, result);
+    } catch (err: any) {
+      this.sendError(res, 500, err.message || 'Failed to sell all positions');
+    }
+  }
+
+  /**
+   * POST /api/cancel-all-orders - Cancel all open orders
+   */
+  private async handleCancelAllOrders(res: ServerResponse): Promise<void> {
+    console.log(`[Dashboard] Cancel All Orders requested`);
+
+    try {
+      const result = await this.callbacks.onCancelAllOrders();
+      this.sendJson(res, 200, result);
+    } catch (err: any) {
+      this.sendError(res, 500, err.message || 'Failed to cancel orders');
     }
   }
 
@@ -720,6 +764,8 @@ export class DashboardServer {
           Dry Run
         </span>
         <button class="btn btn-pause" id="pauseBtn" onclick="togglePause()">Pause</button>
+        <button class="btn btn-sell" style="padding:8px 16px;font-size:14px;" onclick="sellAll()">Sell All</button>
+        <button class="btn" style="padding:8px 16px;font-size:14px;background:#6366f1;color:#fff;" onclick="cancelAllOrders()">Cancel Orders</button>
       </div>
     </header>
 
@@ -978,6 +1024,46 @@ export class DashboardServer {
           await fetchData();
         } else {
           alert('Failed to sell: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function sellAll() {
+      const posCount = document.getElementById('positionsStat').textContent;
+      if (!confirm('Are you sure you want to SELL ALL ' + posCount + ' positions?')) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/sell-all', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success) {
+          alert('Sold ' + data.sold + ' positions' + (data.failed > 0 ? ', ' + data.failed + ' failed' : ''));
+          await fetchData();
+        } else {
+          alert('Failed: ' + (data.error || 'Unknown error'));
+        }
+      } catch (err) {
+        alert('Error: ' + err.message);
+      }
+    }
+
+    async function cancelAllOrders() {
+      if (!confirm('Cancel ALL open orders (TP orders, etc)?')) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/cancel-all-orders', { method: 'POST' });
+        const data = await res.json();
+
+        if (data.success) {
+          alert(data.message || 'All orders cancelled');
+        } else {
+          alert('Failed: ' + (data.error || 'Unknown error'));
         }
       } catch (err) {
         alert('Error: ' + err.message);

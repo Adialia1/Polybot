@@ -1,15 +1,15 @@
 {
   "dryRun": false,
   "enableTrading": true,
-  "userAccountSize": 30,
-  "maxPositionSize": 10,
-  "minTradeSize": 1,
+  "userAccountSize": 25,
+  "maxPositionSize": 2,
+  "minTradeSize": 0.2,
   "fixedTradePercent": 10,
   "minProbability": 0.05,
   "maxProbability": 0.95,
   "trailingStopPercent": 15,
   "trailingStopCheckIntervalMs": 15000,
-  "dailyLossLimit": 15,
+  "dailyLossLimit": 1000,
   "maxOpenPositions": 999,
   "maxRetries": 3,
   "retryDelayMs": 1000,
@@ -26,13 +26,13 @@
       "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
       "alias": "RN1",
       "enabled": true,
-      "allocation": 50
+      "allocation": 80
     },
     {
       "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
       "alias": "Trader2",
       "enabled": true,
-      "allocation": 50
+      "allocation": 20
     }
   ]
 }

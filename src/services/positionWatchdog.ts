@@ -137,6 +137,11 @@ export class PositionWatchdog {
     // 1. Check if TP order is still on the exchange
     const { takeProfitOrderId } = this.stateManager.getProtectionOrders(pos.asset);
 
+    // Positions too small for Polymarket minimum — can't place TP, treat as healthy
+    if (pos.size < 5) {
+      return { asset: pos.asset, title: label, status: 'healthy', detail: `Too small for TP (${pos.size.toFixed(1)} < 5 shares)` };
+    }
+
     if (takeProfitOrderId && !this.exchangeOrderIds.has(takeProfitOrderId)) {
       // TP order was on exchange but is now gone (cancelled externally, expired, or filled)
       // Clear stale ID and re-place
@@ -190,13 +195,20 @@ export class PositionWatchdog {
       // Skip if TP price is not above entry
       if (takeProfitPrice <= pos.avgPrice) return false;
 
-      // Update balance allowance before placing GTC sell
-      await this.trader.updateBalanceAllowance();
+      // Skip if position too small for Polymarket minimum (5 shares)
+      if (pos.size < 5) return false;
 
-      const result = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
-      if (result.success && result.orderId) {
-        this.stateManager.setProtectionOrders(pos.asset, undefined, result.orderId);
-        return true;
+      // Update balance allowance and retry with delay (exchange needs time to propagate)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await this.trader.updateBalanceAllowance(pos.asset);
+        await new Promise(r => setTimeout(r, 2000));
+
+        const result = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
+        if (result.success && result.orderId) {
+          this.stateManager.setProtectionOrders(pos.asset, undefined, result.orderId);
+          return true;
+        }
+        if (!result.error?.includes('not enough balance')) break; // Non-allowance error, stop
       }
       return false;
     } catch (err: any) {

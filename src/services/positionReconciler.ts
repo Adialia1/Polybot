@@ -53,33 +53,25 @@ export class PositionReconciler {
 
     console.log(`[Reconciler] Checking ${ourPositions.length} position(s) against tracked traders...`);
 
-    // Get all trader positions
-    const traderPositions = new Map<string, Set<string>>(); // wallet -> set of assets
+    const enabledWallets = this.trackedWallets.filter(w => w.enabled);
 
-    for (const wallet of this.trackedWallets) {
-      if (!wallet.enabled) continue;
-
-      try {
-        const positions = await this.fetchTraderPositions(wallet.address);
-        const assets = new Set(positions.map(p => p.asset));
-        traderPositions.set(wallet.address.toLowerCase(), assets);
-        console.log(`[Reconciler] ${wallet.alias}: ${positions.length} active positions`);
-      } catch (error: any) {
-        errorLogger.logError('Reconciler.fetchPositions', error, { wallet: wallet.alias });
-        console.error(`[Reconciler] Failed to fetch positions for ${wallet.alias}:`, error);
-        result.errors.push(`Failed to fetch ${wallet.alias} positions`);
-      }
-    }
-
-    // Check each of our positions
+    // Check each of our positions individually (much faster than fetching all trader positions)
     for (const position of ourPositions) {
       result.checkedPositions++;
 
-      // Check if ANY tracked trader still holds this position
+      // Check if ANY tracked trader still holds this specific asset
       let traderStillHolds = false;
 
-      for (const [walletAddr, assets] of traderPositions.entries()) {
-        if (assets.has(position.asset)) {
+      for (const wallet of enabledWallets) {
+        try {
+          const holds = await this.traderHoldsAsset(wallet.address, position.asset);
+          if (holds) {
+            traderStillHolds = true;
+            break;
+          }
+        } catch (error: any) {
+          // If we can't check, assume trader still holds (safer than selling)
+          console.warn(`[Reconciler] Failed to check ${wallet.alias} for ${position.title?.slice(0, 30)}: ${error?.message}`);
           traderStillHolds = true;
           break;
         }
@@ -124,17 +116,22 @@ export class PositionReconciler {
     return result;
   }
 
-  private async fetchTraderPositions(walletAddress: string): Promise<any[]> {
-    const res = await fetch(
-      `https://data-api.polymarket.com/positions?user=${walletAddress.toLowerCase()}`
-    );
+  /**
+   * Check if a specific trader holds a specific asset.
+   * Uses asset filter to avoid fetching all 1000+ positions.
+   */
+  private async traderHoldsAsset(walletAddress: string, asset: string): Promise<boolean> {
+    const url = `https://data-api.polymarket.com/positions?user=${walletAddress.toLowerCase()}&asset=${asset}&limit=1`;
+    const res = await fetch(url);
 
     if (!res.ok) {
       throw new Error(`API returned ${res.status}`);
     }
 
     const data = await res.json();
-    return Array.isArray(data) ? data : [];
+    const positions = Array.isArray(data) ? data : [];
+    // Check if trader has a non-zero position in this asset
+    return positions.some(p => parseFloat(p.size) > 0.001);
   }
 
   private async sellPosition(position: { asset: string; size: number; title: string; outcome: string }): Promise<void> {
@@ -180,14 +177,12 @@ export class PositionReconciler {
       if (!wallet.enabled) continue;
 
       try {
-        const positions = await this.fetchTraderPositions(wallet.address);
-        const hasPosition = positions.some(p => p.asset === asset);
-        if (hasPosition) {
-          return false;
-        }
+        const holds = await this.traderHoldsAsset(wallet.address, asset);
+        if (holds) return false;
       } catch (error) {
-        // If we can't check, assume not orphaned
+        // If we can't check, assume not orphaned (safer)
         console.error(`[Reconciler] Error checking ${wallet.alias}:`, error);
+        return false;
       }
     }
 

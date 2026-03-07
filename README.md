@@ -18,12 +18,14 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 - **Automatic order execution** - Places limit orders via Polymarket CLOB API
 - **Crash recovery** - Persists state to disk, resumes after restart
 - **Order queue** - Handles multiple signals with deduplication
+- **BUY deduplication** - 30-second window prevents duplicate signals from the same trader
+- **Trader profile pre-fetching** - Caches trader profiles on startup to avoid API rate limit bursts
 
 ### Risk Management
-- **Stop Loss** - Polling-based auto-sell at configurable loss threshold (default: -50%). Checked every 60s using midpoint price. Cannot be a limit order on Polymarket (SELL below market fills immediately).
-- **Take Profit** - GTC limit order placed on the exchange after each buy. Auto-fills when price reaches target (default: +200%, capped at $0.99).
+- **Stop Loss** - Polling-based auto-sell at configurable loss threshold (default: -25%). Checked every 60s using midpoint price. Cannot be a limit order on Polymarket (SELL below market fills immediately).
+- **Take Profit** - GTC limit order placed on the exchange after each buy with retry + allowance propagation delay. Auto-fills when price reaches target (default: +100%, capped at $0.99). Positions below 5 shares (Polymarket minimum) are skipped.
 - **Trailing Stop** - WebSocket + REST polling every 30s. Sells when price drops X% from peak (e.g., 15%).
-- **Position Watchdog** - Runs every 60s to verify all TP orders are still live on exchange. Auto-replaces missing orders. Redundant SL safety net.
+- **Position Watchdog** - Runs every 10s to verify all TP orders are still live on exchange. Auto-replaces missing orders. Skips positions below 5-share minimum. Redundant SL safety net.
 - **Daily Loss Limit** - Stop trading if daily losses exceed limit
 - **Max Open Positions** - Limit concurrent positions
 - **Probability Filter** - Skip trades outside probability range (e.g., 5%-95%)
@@ -41,7 +43,7 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 
 ### Automation
 - **Time-Based Exits** - Auto-sell positions held longer than X hours
-- **Position Reconciliation** - Detect and handle orphaned positions every 10 minutes
+- **Position Reconciliation** - Detect and handle orphaned positions every 10 minutes using per-asset targeted queries
 - **Retry Logic** - Retry failed orders with exponential backoff
 - **Protection Order Lifecycle** - All sell paths cancel TP orders before selling to prevent double-sells
 
@@ -49,7 +51,7 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 - **Telegram Notifications** - Alerts for trades, stops, daily summaries
 - **Telegram Bot Commands** - Check status, positions, and stats via chat commands
 - **Health Check Endpoint** - HTTP endpoint for uptime monitoring
-- **Web Dashboard** - Browser UI with positions, trades, P&L, manual controls (filters ghost/zero positions)
+- **Web Dashboard** - Browser UI with positions, trades, P&L, manual controls (Sell All, Cancel All Orders, force sell, filters ghost/zero positions)
 - **Config Hot-Reload** - Update settings without restarting (SL/TP/trailing stop included)
 - **Error Log** - All errors written to `data/logs/errors.log` (thread-safe, auto-rotates at 10MB)
 
@@ -209,7 +211,9 @@ WHITELIST_KEYWORDS=Bitcoin,Trump,Election
 - View recent trades
 - Per-trader performance stats
 - Pause/Resume bot
-- Force sell positions
+- Force sell individual positions
+- Sell All positions at once
+- Cancel All open orders
 - Auto-refresh every 10 seconds
 
 ### Polling & Timing
@@ -384,6 +388,7 @@ polybot/
 │   │   ├── positionWatchdog.ts     # Watchdog: verifies TP orders, replaces missing
 │   │   ├── timeBasedExitMonitor.ts # Time-based exit monitoring
 │   │   ├── positionReconciler.ts   # Orphaned position detection
+│   │   ├── positionSizer.ts        # Smart position sizing with trader profile caching
 │   │   ├── tradeFilter.ts     # Blacklist/whitelist filtering
 │   │   ├── notifier.ts        # Telegram notifications
 │   │   ├── healthCheck.ts     # HTTP health endpoint
@@ -423,16 +428,19 @@ State survives crashes and restarts.
 
 ## How Trade Copying Works
 
-1. **Monitor** - Polls each tracked wallet's activity every second
-2. **Detect** - Identifies new BUY/SELL trades since last check
-3. **Filter** - Applies probability, blacklist, whitelist, conflict checks
-4. **Size** - Calculates position size (fixed % or proportional to trader)
-5. **Queue** - Adds order to queue with deduplication
-6. **Execute** - BUY uses FOK (fill-or-kill), SELL uses FAK (fill-and-kill)
-7. **Protect** - After BUY: updates balance allowance, places GTC take profit limit order
-8. **Track** - Updates local position state with entry price and TP order ID
-9. **Monitor** - Watchdog (every 60s) verifies TP orders, RiskManager checks SL, TrailingStop monitors peaks
-10. **Exit** - On any sell: cancels TP order first, then executes market sell
+1. **Pre-fetch** - On startup, caches trader profiles to avoid API rate limit bursts
+2. **Monitor** - Polls each tracked wallet's activity every second
+3. **Detect** - Identifies new BUY/SELL trades since last check
+4. **Deduplicate** - 30-second window prevents burst duplicate BUY signals from the same trader
+5. **Filter** - Applies probability, blacklist, whitelist, conflict checks
+6. **Size** - Calculates position size (fixed % or proportional to trader)
+7. **Queue** - Adds order to queue with deduplication
+8. **Execute** - BUY uses FOK (fill-or-kill), SELL uses FAK (fill-and-kill)
+9. **Protect** - After BUY: updates balance allowance (with token_id), waits for propagation, places GTC take profit limit order with retry
+10. **Track** - Updates local position state with entry price and TP order ID
+11. **Monitor** - Watchdog (every 10s) verifies TP orders, RiskManager checks SL, TrailingStop monitors peaks
+12. **Reconcile** - Every 10 minutes, checks each position against tracked traders using per-asset API queries
+13. **Exit** - On any sell: cancels TP order first, then executes market sell
 
 ---
 
@@ -470,9 +478,16 @@ State survives crashes and restarts.
 - Verify API credentials are valid
 
 ### TP Order Disappeared
-- The Watchdog checks every 60s and auto-replaces missing TP orders
+- The Watchdog checks every 10s and auto-replaces missing TP orders
+- Positions below 5 shares are skipped (Polymarket minimum order size)
+- TP placement uses retry with delay for balance allowance propagation
 - Check error log for `Watchdog.replaceTP` entries
 - You'll get a Telegram alert when TP orders are replaced
+
+### FOK Order Failures
+- FOK (Fill-Or-Kill) orders fail when there's insufficient liquidity at the target price
+- Common when copying whale traders who consume all available liquidity
+- The bot detects FOK failures and does not create phantom positions
 
 ---
 
