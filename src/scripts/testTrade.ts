@@ -64,7 +64,7 @@ async function testTrade() {
   // Derive API credentials
   console.log('Deriving API credentials...');
   const creds = await client.createOrDeriveApiKey();
-  console.log('API Key:', creds.apiKey.slice(0, 20) + '...');
+  console.log('API Key:', (creds as any).apiKey.slice(0, 20) + '...');
 
   // Reinitialize with credentials
   client = new ClobClient(

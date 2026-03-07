@@ -29,7 +29,7 @@ async function main() {
     functionName: 'balanceOf',
     args: [WALLET],
   });
-  console.log('USDC.e (bridged):', formatUnits(usdceBalance, 6), 'USDC');
+  console.log('USDC.e (bridged):', formatUnits(usdceBalance as bigint, 6), 'USDC');
 
   const usdcBalance = await client.readContract({
     address: USDC_NATIVE_ADDRESS,
@@ -37,7 +37,7 @@ async function main() {
     functionName: 'balanceOf',
     args: [WALLET],
   });
-  console.log('USDC (native):   ', formatUnits(usdcBalance, 6), 'USDC');
+  console.log('USDC (native):   ', formatUnits(usdcBalance as bigint, 6), 'USDC');
 
   const usdtBalance = await client.readContract({
     address: USDT_ADDRESS,
@@ -45,7 +45,7 @@ async function main() {
     functionName: 'balanceOf',
     args: [WALLET],
   });
-  console.log('USDT:            ', formatUnits(usdtBalance, 6), 'USDT');
+  console.log('USDT:            ', formatUnits(usdtBalance as bigint, 6), 'USDT');
 
   // Also check native MATIC for gas
   const maticBalance = await client.getBalance({ address: WALLET });
