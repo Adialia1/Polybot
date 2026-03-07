@@ -123,6 +123,9 @@ export interface CopyConfig {
   retryDelayMs: number; // Base delay between retries in ms (default: 2000)
   // Daily loss limit
   dailyLossLimit: number; // Max daily loss in USD (e.g., 10 = stop if down $10, 0 = disabled)
+  // Stop loss / Take profit
+  stopLossPercent: number; // Sell if position drops X% (negative, e.g., -25 = sell at 25% loss)
+  takeProfitPercent: number; // Sell if position gains X% (e.g., 100 = sell at 100% gain)
   // Trailing stop loss
   trailingStopPercent: number; // Sell if price drops X% from peak (0 = disabled)
   trailingStopCheckIntervalMs: number; // Check interval in ms

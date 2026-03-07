@@ -13,6 +13,7 @@ export const HOT_RELOADABLE_SETTINGS = [
   'maxPositionSize',
   'minTradeSize',
   'maxPercentagePerTrade',
+  'fixedTradePercent',
   'minProbability',
   'maxProbability',
   'blacklistKeywords',
@@ -20,6 +21,8 @@ export const HOT_RELOADABLE_SETTINGS = [
   'maxOpenPositions',
   'dryRun',
   'dailyLossLimit',
+  'stopLossPercent',
+  'takeProfitPercent',
   'trailingStopPercent',
   'trailingStopCheckIntervalMs',
   'conflictStrategy',
@@ -59,6 +62,7 @@ export interface ConfigFileSchema {
   minTradeSize?: number;
   userAccountSize?: number;
   maxPercentagePerTrade?: number;
+  fixedTradePercent?: number; // If set, use fixed % per trade instead of proportional
 
   // Wallets to track
   trackWallets?: Array<{
@@ -85,6 +89,8 @@ export interface ConfigFileSchema {
 
   // Risk management
   dailyLossLimit?: number;
+  stopLossPercent?: number;
+  takeProfitPercent?: number;
   trailingStopPercent?: number;
   trailingStopCheckIntervalMs?: number;
   maxHoldTimeHours?: number;
@@ -250,6 +256,14 @@ export class ConfigLoader extends EventEmitter {
       }
     }
 
+    if (schema.fixedTradePercent !== undefined) {
+      if (typeof schema.fixedTradePercent === 'number' && schema.fixedTradePercent > 0 && schema.fixedTradePercent <= 100) {
+        (config as any).fixedTradePercent = schema.fixedTradePercent;
+      } else {
+        errors.push('fixedTradePercent must be between 0 and 100');
+      }
+    }
+
     if (schema.minProbability !== undefined) {
       if (typeof schema.minProbability === 'number' && schema.minProbability >= 0 && schema.minProbability <= 1) {
         config.minProbability = schema.minProbability;
@@ -295,6 +309,22 @@ export class ConfigLoader extends EventEmitter {
         config.dailyLossLimit = schema.dailyLossLimit;
       } else {
         errors.push('dailyLossLimit must be a non-negative number');
+      }
+    }
+
+    if (schema.stopLossPercent !== undefined) {
+      if (typeof schema.stopLossPercent === 'number' && schema.stopLossPercent < 0) {
+        config.stopLossPercent = schema.stopLossPercent;
+      } else {
+        errors.push('stopLossPercent must be a negative number (e.g., -25)');
+      }
+    }
+
+    if (schema.takeProfitPercent !== undefined) {
+      if (typeof schema.takeProfitPercent === 'number' && schema.takeProfitPercent > 0) {
+        config.takeProfitPercent = schema.takeProfitPercent;
+      } else {
+        errors.push('takeProfitPercent must be a positive number (e.g., 100)');
       }
     }
 

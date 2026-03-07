@@ -2,6 +2,7 @@ import { StateManager } from './stateManager.js';
 import { Trader } from './trader.js';
 import { ClobApiClient } from '../api/clobApi.js';
 import { WalletConfig } from '../types/index.js';
+import { errorLogger } from './errorLogger.js';
 
 export interface ReconcilerConfig {
   stateManager: StateManager;
@@ -63,7 +64,8 @@ export class PositionReconciler {
         const assets = new Set(positions.map(p => p.asset));
         traderPositions.set(wallet.address.toLowerCase(), assets);
         console.log(`[Reconciler] ${wallet.alias}: ${positions.length} active positions`);
-      } catch (error) {
+      } catch (error: any) {
+        errorLogger.logError('Reconciler.fetchPositions', error, { wallet: wallet.alias });
         console.error(`[Reconciler] Failed to fetch positions for ${wallet.alias}:`, error);
         result.errors.push(`Failed to fetch ${wallet.alias} positions`);
       }
@@ -100,6 +102,7 @@ export class PositionReconciler {
             result.soldPositions++;
             console.log(`[Reconciler] ✅ Position sold`);
           } catch (error: any) {
+            errorLogger.logError('Reconciler.sell', error, { title: position.title?.slice(0, 40) });
             console.error(`[Reconciler] Failed to sell:`, error?.message || error);
             result.errors.push(`Failed to sell ${position.title}`);
           }
@@ -139,24 +142,27 @@ export class PositionReconciler {
       throw new Error('Trader not initialized');
     }
 
-    // Get current price
+    // Cancel any SL/TP protection orders before selling
+    const { stopLossOrderId, takeProfitOrderId } = this.stateManager.getProtectionOrders(position.asset);
+    const orderIds = [stopLossOrderId, takeProfitOrderId].filter(Boolean) as string[];
+    if (orderIds.length > 0) {
+      console.log(`[Reconciler] Cancelling ${orderIds.length} protection order(s)...`);
+      await this.trader.cancelOrders(orderIds);
+      this.stateManager.clearProtectionOrders(position.asset);
+    }
+
+    // Get current best bid price
     const book = await this.clobApi.getOrderBook(position.asset);
     const bestBid = parseFloat(book.bids?.[0]?.price || '0.5');
     const sellPrice = Math.max(0.01, bestBid);
 
-    // Create a trade object for the trader
-    const trade = {
-      asset: position.asset,
-      side: 'SELL' as const,
-      size: position.size,
-      price: sellPrice,
-      title: position.title,
-      outcome: position.outcome,
-      timestamp: Math.floor(Date.now() / 1000),
-    };
-
-    const amount = position.size * sellPrice;
-    const result = await this.trader.copyTrade(trade as any, amount);
+    // Use dedicated sellPosition method (passes shares correctly, uses FAK)
+    const result = await this.trader.sellPosition(
+      position.asset,
+      position.size,
+      sellPrice,
+      position.title,
+    );
 
     if (!result.success) {
       throw new Error(result.error || 'Unknown error');

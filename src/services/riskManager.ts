@@ -2,6 +2,7 @@ import { StateManager } from './stateManager.js';
 import { Trader } from './trader.js';
 import { TelegramNotifier } from './notifier.js';
 import { ClobApiClient } from '../api/clobApi.js';
+import { errorLogger } from './errorLogger.js';
 
 export interface RiskConfig {
   // Stop loss: sell if position drops below this % (e.g., -20 means sell at 20% loss)
@@ -122,6 +123,17 @@ export class RiskManager {
     }
   }
 
+  updateConfig(newConfig: Partial<RiskConfig>): void {
+    if (newConfig.stopLossPercent !== undefined) {
+      this.config.stopLossPercent = newConfig.stopLossPercent;
+      console.log(`[RiskManager] Updated stopLossPercent to ${newConfig.stopLossPercent}%`);
+    }
+    if (newConfig.takeProfitPercent !== undefined) {
+      this.config.takeProfitPercent = newConfig.takeProfitPercent;
+      console.log(`[RiskManager] Updated takeProfitPercent to +${newConfig.takeProfitPercent}%`);
+    }
+  }
+
   private async checkPositions(): Promise<void> {
     const positions = this.stateManager.getAllPositions();
     if (positions.length === 0) return;
@@ -157,8 +169,8 @@ export class RiskManager {
 
           await this.sellPosition(position, 'Take Profit', currentPrice, pnlPercent);
         }
-      } catch (error) {
-        // Silently continue on error
+      } catch (error: any) {
+        errorLogger.logError('RiskManager.checkPosition', error, { asset: position.asset?.slice(0, 30), title: position.title?.slice(0, 40) });
       }
     }
   }
@@ -209,22 +221,26 @@ export class RiskManager {
     }
 
     try {
-      // Get current bid price
+      // Cancel any SL/TP protection orders before selling
+      const { stopLossOrderId, takeProfitOrderId } = this.stateManager.getProtectionOrders(position.asset);
+      const orderIds = [stopLossOrderId, takeProfitOrderId].filter(Boolean) as string[];
+      if (orderIds.length > 0 && this.trader) {
+        console.log(`  Cancelling ${orderIds.length} protection order(s)...`);
+        await this.trader.cancelOrders(orderIds);
+        this.stateManager.clearProtectionOrders(position.asset);
+      }
+
+      // Get current bid price for selling
       const spread = await this.clobApi.getSpread(position.asset);
       const sellPrice = Math.max(0.01, parseFloat(spread.bid || '0.5'));
 
-      const trade = {
-        asset: position.asset,
-        side: 'SELL' as const,
-        size: position.size,
-        price: sellPrice,
-        title: position.title,
-        outcome: position.outcome,
-        timestamp: Math.floor(Date.now() / 1000),
-      };
-
-      const amount = position.size * sellPrice;
-      const result = await this.trader.copyTrade(trade as any, amount);
+      // Use dedicated sellPosition method (passes shares correctly, uses FAK)
+      const result = await this.trader.sellPosition(
+        position.asset,
+        position.size,
+        sellPrice,
+        position.title,
+      );
 
       if (result.success) {
         console.log(`  ✅ ${reason} executed - Order ID: ${result.orderId}`);
@@ -263,6 +279,7 @@ export class RiskManager {
         }
       }
     } catch (error: any) {
+      errorLogger.logError('RiskManager.sellPosition', error, { reason, asset: position.asset?.slice(0, 30), pnlPercent });
       console.log(`  ❌ ${reason} error: ${error?.message || error}`);
 
       // Send error notification

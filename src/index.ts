@@ -28,6 +28,7 @@ async function main() {
     maxPositionSize: config.maxPositionSize,
     minTradeSize: config.minTradeSize,
     maxPercentage: config.maxPercentagePerTrade,
+    fixedTradePercent: (config as any).fixedTradePercent,
   });
 
   // Initialize trader (if trading is enabled)
@@ -119,8 +120,9 @@ async function main() {
         console.log('='.repeat(50) + '\n');
         return;
       }
-    } catch (err) {
+    } catch (err: any) {
       console.log(`\n  [Could not calculate position size - skipping]`);
+      console.log(`  Error: ${err?.message || err}`);
       console.log('='.repeat(50) + '\n');
       return;
     }

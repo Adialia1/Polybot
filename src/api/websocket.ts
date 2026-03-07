@@ -74,11 +74,14 @@ export class MarketWebSocket extends EventEmitter {
 
       this.ws.on('message', (data: Buffer) => {
         try {
-          const message = JSON.parse(data.toString());
+          const raw = data.toString();
 
-          if (message === 'PONG') {
+          // PONG is a plain string, not JSON - check before parsing
+          if (raw === 'PONG') {
             return;
           }
+
+          const message = JSON.parse(raw);
 
           if (Array.isArray(message)) {
             for (const event of message) {
@@ -88,7 +91,11 @@ export class MarketWebSocket extends EventEmitter {
             this.handleEvent(message);
           }
         } catch (error) {
-          console.error('[WS] Failed to parse message:', error);
+          // Suppress noise from known non-JSON responses
+          const msg = data.toString();
+          if (msg !== 'INVALID OPERATION') {
+            console.error('[WS] Failed to parse message:', msg);
+          }
         }
       });
 

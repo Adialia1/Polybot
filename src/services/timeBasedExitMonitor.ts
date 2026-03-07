@@ -3,6 +3,7 @@ import { StateManager } from './stateManager.js';
 import { Trader } from './trader.js';
 import { TelegramNotifier } from './notifier.js';
 import { ClobApiClient } from '../api/clobApi.js';
+import { errorLogger } from './errorLogger.js';
 
 export interface TimeBasedExitConfig {
   // Max hours to hold a position (e.g., 48 = sell if held longer than 48 hours)
@@ -252,22 +253,26 @@ export class TimeBasedExitMonitor extends EventEmitter {
     }
 
     try {
+      // Cancel any SL/TP protection orders before selling
+      const { stopLossOrderId, takeProfitOrderId } = this.stateManager.getProtectionOrders(position.asset);
+      const orderIds = [stopLossOrderId, takeProfitOrderId].filter(Boolean) as string[];
+      if (orderIds.length > 0 && this.trader) {
+        console.log(`  Cancelling ${orderIds.length} protection order(s)...`);
+        await this.trader.cancelOrders(orderIds);
+        this.stateManager.clearProtectionOrders(position.asset);
+      }
+
       // Get current bid price for selling
       const spread = await this.clobApi.getSpread(position.asset);
       const sellPrice = Math.max(0.01, parseFloat(spread.bid || '0.5'));
 
-      const trade = {
-        asset: position.asset,
-        side: 'SELL' as const,
-        size: position.size,
-        price: sellPrice,
-        title: position.title,
-        outcome: position.outcome,
-        timestamp: Math.floor(Date.now() / 1000),
-      };
-
-      const amount = position.size * sellPrice;
-      const result = await this.trader.copyTrade(trade as any, amount);
+      // Use dedicated sellPosition method (passes shares correctly, uses FAK)
+      const result = await this.trader.sellPosition(
+        position.asset,
+        position.size,
+        sellPrice,
+        position.title,
+      );
 
       if (result.success) {
         console.log(`  [TimeBasedExit] Position sold - Order ID: ${result.orderId}`);
@@ -315,6 +320,7 @@ export class TimeBasedExitMonitor extends EventEmitter {
         }
       }
     } catch (error: any) {
+      errorLogger.logError('TimeBasedExit.sell', error, { asset: position.asset?.slice(0, 30) });
       console.log(`  [TimeBasedExit] Error: ${error?.message || error}`);
 
       // Send error notification

@@ -3,6 +3,8 @@ import { StateManager } from './stateManager.js';
 import { Trader } from './trader.js';
 import { TelegramNotifier } from './notifier.js';
 import { ClobApiClient } from '../api/clobApi.js';
+import { MarketWebSocket } from '../api/websocket.js';
+import { errorLogger } from './errorLogger.js';
 
 export interface TrailingStopConfig {
   // Trailing stop percentage (e.g., 15 = sell if price drops 15% from peak)
@@ -29,9 +31,12 @@ export class TrailingStopMonitor extends EventEmitter {
   private trader: Trader | null;
   private notifier: TelegramNotifier | null;
   private clobApi: ClobApiClient;
+  private ws: MarketWebSocket | null = null;
   private checkInterval: NodeJS.Timeout | null = null;
   private dryRun: boolean;
   private isProcessing = false;
+  // Track latest prices from WebSocket for faster checks
+  private latestPrices: Map<string, number> = new Map();
 
   constructor(
     config: TrailingStopConfig,
@@ -43,7 +48,7 @@ export class TrailingStopMonitor extends EventEmitter {
     super();
     this.config = {
       trailingStopPercent: config.trailingStopPercent,
-      checkIntervalMs: config.checkIntervalMs || 60000,
+      checkIntervalMs: config.checkIntervalMs || 30000, // Default 30s (was 60s)
     };
     this.stateManager = stateManager;
     this.trader = trader;
@@ -67,6 +72,9 @@ export class TrailingStopMonitor extends EventEmitter {
     console.log(`  Trailing Stop: ${this.config.trailingStopPercent}% from peak`);
     console.log(`  Check Interval: ${this.config.checkIntervalMs / 1000}s`);
 
+    // Start WebSocket for real-time price updates
+    this.startWebSocket();
+
     this.checkInterval = setInterval(() => {
       this.checkPositions();
     }, this.config.checkIntervalMs);
@@ -76,14 +84,70 @@ export class TrailingStopMonitor extends EventEmitter {
   }
 
   /**
+   * Start WebSocket connection for real-time price updates on held positions
+   */
+  private async startWebSocket(): Promise<void> {
+    try {
+      this.ws = new MarketWebSocket();
+      await this.ws.connect();
+
+      // Subscribe to price updates for current positions
+      const positions = this.stateManager.getAllPositions();
+      if (positions.length > 0) {
+        const assetIds = positions.map(p => p.asset);
+        this.ws.subscribeToAssets(assetIds);
+        console.log(`[TrailingStop] WebSocket subscribed to ${assetIds.length} position prices`);
+      }
+
+      // Listen for price changes
+      this.ws.on('last_trade_price', (event: any) => {
+        const price = parseFloat(event.price);
+        if (price > 0 && event.asset_id) {
+          this.latestPrices.set(event.asset_id, price);
+        }
+      });
+
+      this.ws.on('price_change', (event: any) => {
+        const price = parseFloat(event.price);
+        if (price > 0 && event.asset_id) {
+          this.latestPrices.set(event.asset_id, price);
+        }
+      });
+    } catch (error) {
+      console.error('[TrailingStop] WebSocket connection failed, falling back to polling:', error);
+      // Continue with polling only - not critical
+    }
+  }
+
+  /**
+   * Update WebSocket subscriptions when positions change
+   */
+  updateSubscriptions(): void {
+    if (!this.ws) return;
+
+    const positions = this.stateManager.getAllPositions();
+    if (positions.length > 0) {
+      const assetIds = positions.map(p => p.asset);
+      this.ws.subscribeToAssets(assetIds);
+    }
+  }
+
+  /**
    * Stop monitoring
    */
   stopMonitoring(): void {
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
-      console.log('[TrailingStop] Stopped');
     }
+
+    if (this.ws) {
+      this.ws.disconnect();
+      this.ws = null;
+    }
+
+    this.latestPrices.clear();
+    console.log('[TrailingStop] Stopped');
   }
 
   /**
@@ -131,9 +195,14 @@ export class TrailingStopMonitor extends EventEmitter {
 
       for (const position of positions) {
         try {
-          // Get current price (use bid as it's what we'd get when selling)
-          const spread = await this.clobApi.getSpread(position.asset);
-          const currentPrice = parseFloat(spread.bid || '0');
+          // Try WebSocket price first (real-time), fall back to REST API
+          let currentPrice = this.latestPrices.get(position.asset) || 0;
+
+          if (currentPrice === 0) {
+            // Fall back to REST API - use bid as it's what we'd get when selling
+            const spread = await this.clobApi.getSpread(position.asset);
+            currentPrice = parseFloat(spread.bid || '0');
+          }
 
           if (currentPrice === 0 || position.avgPrice === 0) continue;
 
@@ -151,7 +220,7 @@ export class TrailingStopMonitor extends EventEmitter {
           );
 
           if (check.triggered) {
-            console.log(`\n📉 TRAILING STOP TRIGGERED:`);
+            console.log(`\n[TrailingStop] TRAILING STOP TRIGGERED:`);
             console.log(`  ${position.title} - ${position.outcome}`);
             console.log(`  Entry: $${position.avgPrice.toFixed(3)}`);
             console.log(`  Peak: $${check.highestPrice!.toFixed(3)}`);
@@ -174,8 +243,10 @@ export class TrailingStopMonitor extends EventEmitter {
             // Execute the sell
             await this.sellPosition(position, currentPrice, check.highestPrice!, check.dropPercent!);
           }
-        } catch (error) {
-          // Silently continue on individual position errors
+        } catch (error: any) {
+          // Log errors instead of silently swallowing
+          errorLogger.logError('TrailingStop.checkPosition', error, { asset: position.asset?.slice(0, 30), title: position.title?.slice(0, 40) });
+          console.error(`[TrailingStop] Error checking ${position.title || position.asset.slice(0, 20)}:`, error?.message || error);
         }
       }
     } finally {
@@ -237,32 +308,33 @@ export class TrailingStopMonitor extends EventEmitter {
     }
 
     try {
-      // Get current bid price for selling
-      const spread = await this.clobApi.getSpread(position.asset);
-      const sellPrice = Math.max(0.01, parseFloat(spread.bid || '0.5'));
+      // Cancel any SL/TP protection orders before selling
+      const { stopLossOrderId, takeProfitOrderId } = this.stateManager.getProtectionOrders(position.asset);
+      const orderIds = [stopLossOrderId, takeProfitOrderId].filter(Boolean) as string[];
+      if (orderIds.length > 0 && this.trader) {
+        console.log(`  Cancelling ${orderIds.length} protection order(s)...`);
+        await this.trader.cancelOrders(orderIds);
+        this.stateManager.clearProtectionOrders(position.asset);
+      }
 
-      const trade = {
-        asset: position.asset,
-        side: 'SELL' as const,
-        size: position.size,
-        price: sellPrice,
-        title: position.title,
-        outcome: position.outcome,
-        timestamp: Math.floor(Date.now() / 1000),
-      };
-
-      const amount = position.size * sellPrice;
-      const result = await this.trader.copyTrade(trade as any, amount);
+      // Use the dedicated sellPosition method on Trader
+      // Pass shares directly (not USD value)
+      const result = await this.trader.sellPosition(
+        position.asset,
+        position.size,
+        currentPrice,
+        position.title,
+      );
 
       if (result.success) {
-        console.log(`  ✅ Trailing stop executed - Order ID: ${result.orderId}`);
+        console.log(`  Trailing stop executed - Order ID: ${result.orderId}`);
         console.log(`  P&L from entry: ${pnlFromEntry >= 0 ? '+' : ''}${pnlFromEntry.toFixed(1)}%`);
 
         // Update position state (remove it)
-        this.stateManager.updatePosition(position.asset, -position.size, sellPrice);
+        this.stateManager.updatePosition(position.asset, -position.size, currentPrice);
 
         // Update daily P&L
-        const realizedPnL = (sellPrice - position.avgPrice) * position.size;
+        const realizedPnL = (currentPrice - position.avgPrice) * position.size;
         this.stateManager.updateDailyPnL(realizedPnL);
 
         // Send success notification
@@ -281,7 +353,7 @@ export class TrailingStopMonitor extends EventEmitter {
           });
         }
       } else {
-        console.log(`  ❌ Trailing stop failed: ${result.error}`);
+        console.log(`  Trailing stop failed: ${result.error}`);
 
         // Send failure notification
         if (this.notifier) {
@@ -300,7 +372,8 @@ export class TrailingStopMonitor extends EventEmitter {
         }
       }
     } catch (error: any) {
-      console.log(`  ❌ Trailing stop error: ${error?.message || error}`);
+      errorLogger.logError('TrailingStop.sellPosition', error, { asset: position.asset?.slice(0, 30) });
+      console.error(`  Trailing stop error: ${error?.message || error}`);
 
       // Send error notification
       if (this.notifier) {
@@ -344,7 +417,7 @@ export class TrailingStopMonitor extends EventEmitter {
       : `Failed to sell: ${data.error}`;
 
     const message = `
-📉 <b>Trailing Stop Triggered</b>
+<b>Trailing Stop Triggered</b>
 
 <b>Market:</b> ${data.title}
 <b>Outcome:</b> ${data.outcome}
@@ -355,7 +428,7 @@ export class TrailingStopMonitor extends EventEmitter {
 <b>P&L from Entry:</b> ${pnlSign}${data.pnlPercent.toFixed(1)}%
 <b>Size:</b> ${data.size.toFixed(4)} shares
 
-${data.success ? '✅' : '❌'} ${statusLine}
+${data.success ? 'Position sold' : 'FAILED'} ${statusLine}
 `.trim();
 
     await this.notifier.notify(message);

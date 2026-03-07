@@ -1,27 +1,49 @@
 import 'dotenv/config';
-import { ClobClient } from '@polymarket/clob-client';
-import { createWalletClient, http } from 'viem';
+import { createWalletClient, http, parseUnits, encodeFunctionData } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon } from 'viem/chains';
 
-const CLOB_HOST = 'https://clob.polymarket.com';
-const CHAIN_ID = 137;
+// Token addresses
+const USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+const CONDITIONAL_TOKEN_ADDRESS = '0x4D97DCd97eC945f40cF65F87097ACe5EA0476045';
 
-async function approve() {
+// Exchange contract addresses that need approval
+const EXCHANGE_CONTRACTS = [
+  '0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E', // Main exchange
+  '0xC5d563A36AE78145C45a50134d48A1215220f80a', // Neg risk markets
+  '0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296', // Neg risk adapter
+];
+
+// ERC20 approve ABI
+const APPROVE_ABI = [
+  {
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    name: 'approve',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
+
+async function approveAllowances() {
   const privateKey = process.env.PRIVATE_KEY;
   if (!privateKey) {
-    console.error('No PRIVATE_KEY set in .env');
+    console.error('❌ No PRIVATE_KEY set in .env');
     process.exit(1);
   }
 
-  console.log('='.repeat(50));
-  console.log('  Approve USDC for Polymarket Trading');
-  console.log('='.repeat(50));
+  console.log('='.repeat(60));
+  console.log('  SET POLYMARKET TRADING ALLOWANCES');
+  console.log('='.repeat(60));
   console.log('');
 
   // Create wallet
   const account = privateKeyToAccount(privateKey as `0x${string}`);
   console.log('Wallet:', account.address);
+  console.log('');
 
   const walletClient = createWalletClient({
     account,
@@ -29,54 +51,87 @@ async function approve() {
     transport: http('https://polygon.drpc.org'),
   });
 
-  // Create CLOB client
-  console.log('Connecting to Polymarket...');
-  const client = new ClobClient(
-    CLOB_HOST,
-    CHAIN_ID,
-    walletClient,
-    undefined,
-    undefined,
-    account.address,
-  );
+  // Unlimited approval amount (max uint256)
+  const unlimitedAmount = parseUnits('1000000000', 6); // 1 billion USDC (with 6 decimals)
 
-  console.log('');
-  console.log('Setting up allowances for trading...');
-  console.log('This will approve USDC spending for the Polymarket exchange.');
+  console.log('🔄 Approving USDC for exchange contracts...');
   console.log('');
 
-  try {
-    // The ClobClient should have methods to set up allowances
-    // Let's check what's available
-    const result = await client.setAllowances();
-    console.log('✅ Allowances set successfully!');
-    console.log('Result:', result);
-  } catch (error: any) {
-    console.log('');
-
-    if (error?.message) {
-      console.log('Error:', error.message);
-    }
-
-    // Try alternative approach - direct contract approval
-    console.log('');
-    console.log('Trying alternative approval method...');
-
+  // Approve USDC for all exchange contracts
+  for (const exchangeContract of EXCHANGE_CONTRACTS) {
     try {
-      // Get the CTF exchange address and approve USDC
-      const allowanceResult = await client.updateBalanceAllowance(1000000); // $1M allowance
-      console.log('✅ Balance allowance updated!');
-      console.log('Result:', allowanceResult);
-    } catch (e: any) {
-      console.log('Alternative also failed:', e?.message || e);
-      console.log('');
-      console.log('You may need to manually approve USDC on Polymarket:');
-      console.log('1. Go to https://polymarket.com');
-      console.log('2. Connect your wallet');
-      console.log('3. Try to place a small trade');
-      console.log('4. Approve the transaction when prompted');
+      console.log(`Approving ${exchangeContract}...`);
+
+      const hash = await walletClient.writeContract({
+        address: USDC_ADDRESS as `0x${string}`,
+        abi: APPROVE_ABI,
+        functionName: 'approve',
+        args: [exchangeContract as `0x${string}`, unlimitedAmount],
+      });
+
+      console.log(`  ✅ Transaction sent: ${hash}`);
+      console.log(`  Waiting for confirmation...`);
+
+      // Wait a bit for the transaction to be mined
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (error: any) {
+      console.error(`  ❌ Failed: ${error.message}`);
     }
   }
+
+  console.log('');
+  console.log('🔄 Approving Conditional Tokens for exchange contracts...');
+  console.log('');
+
+  // Approve Conditional Tokens for all exchange contracts
+  // Note: Conditional tokens use setApprovalForAll instead of approve
+  const SET_APPROVAL_FOR_ALL_ABI = [
+    {
+      inputs: [
+        { name: 'operator', type: 'address' },
+        { name: 'approved', type: 'bool' },
+      ],
+      name: 'setApprovalForAll',
+      outputs: [],
+      stateMutability: 'nonpayable',
+      type: 'function',
+    },
+  ] as const;
+
+  for (const exchangeContract of EXCHANGE_CONTRACTS) {
+    try {
+      console.log(`Approving ${exchangeContract}...`);
+
+      const hash = await walletClient.writeContract({
+        address: CONDITIONAL_TOKEN_ADDRESS as `0x${string}`,
+        abi: SET_APPROVAL_FOR_ALL_ABI,
+        functionName: 'setApprovalForAll',
+        args: [exchangeContract as `0x${string}`, true],
+      });
+
+      console.log(`  ✅ Transaction sent: ${hash}`);
+      console.log(`  Waiting for confirmation...`);
+
+      // Wait a bit for the transaction to be mined
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    } catch (error: any) {
+      console.error(`  ❌ Failed: ${error.message}`);
+    }
+  }
+
+  console.log('');
+  console.log('='.repeat(60));
+  console.log('✅ ALLOWANCE SETUP COMPLETE!');
+  console.log('='.repeat(60));
+  console.log('');
+  console.log('You can now trade on Polymarket!');
+  console.log('Restart your bot to start copying trades.');
+  console.log('');
 }
 
-approve().catch(console.error);
+approveAllowances()
+  .catch((error) => {
+    console.error('');
+    console.error('❌ Error:', error.message);
+    process.exit(1);
+  });

@@ -8,6 +8,7 @@ import { PositionReconciler } from './services/positionReconciler.js';
 import { RiskManager } from './services/riskManager.js';
 import { TrailingStopMonitor } from './services/trailingStopMonitor.js';
 import { TimeBasedExitMonitor } from './services/timeBasedExitMonitor.js';
+import { PositionWatchdog } from './services/positionWatchdog.js';
 import { Trader } from './services/trader.js';
 import { TelegramNotifier } from './services/notifier.js';
 import { HealthCheckServer } from './services/healthCheck.js';
@@ -16,6 +17,7 @@ import { isMarketBlacklisted, isMarketWhitelisted } from './services/tradeFilter
 import { getConfigLoader } from './services/configLoader.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig, updateConfig, getConfig } from './config.js';
+import { errorLogger } from './services/errorLogger.js';
 import { TradeSignal, WalletConfig, Trade, RecentSignal, CopyConfig } from './types/index.js';
 
 // Conflict resolution timeout (5 minutes in milliseconds)
@@ -33,6 +35,7 @@ export class CopyTradingBot {
   private riskManager: RiskManager | null = null;
   private trailingStopMonitor: TrailingStopMonitor | null = null;
   private timeBasedExitMonitor: TimeBasedExitMonitor | null = null;
+  private watchdog: PositionWatchdog | null = null;
   private trader: Trader | null = null;
   private clobApi: ClobApiClient;
   private notifier: TelegramNotifier;
@@ -57,11 +60,12 @@ export class CopyTradingBot {
       maxPositionSize: this.config.maxPositionSize,
       minTradeSize: this.config.minTradeSize,
       maxPercentage: this.config.maxPercentagePerTrade,
+      fixedTradePercent: (this.config as any).fixedTradePercent,
     });
 
     this.orderQueue = new OrderQueue({
-      maxConcurrent: 1,
-      orderDelayMs: 1000,
+      maxConcurrent: 3, // Allow parallel orders for different assets
+      orderDelayMs: 200, // Reduced delay between orders for speed
     });
 
     // Handle order processing
@@ -138,7 +142,8 @@ export class CopyTradingBot {
 
       try {
         await this.trader.initialize();
-      } catch (err) {
+      } catch (err: any) {
+        errorLogger.logError('Bot.initTrader', err);
         console.error('Failed to initialize trader:', err);
         return;
       }
@@ -163,24 +168,23 @@ export class CopyTradingBot {
         }
       }
 
-      // Start periodic reconciliation (every hour)
+      // Start periodic reconciliation (every 10 minutes)
       this.reconcileInterval = setInterval(async () => {
         if (this.stateManager.getAllPositions().length > 0) {
-          console.log('\n🔄 Running periodic reconciliation...');
           try {
             await this.reconciler!.reconcile();
           } catch (err) {
             console.error('Periodic reconciliation failed:', err);
           }
         }
-      }, 60 * 60 * 1000); // Every hour
-      console.log('[Reconciler] Periodic check enabled (every 1h)');
+      }, 10 * 60 * 1000); // Every 10 minutes
+      console.log('[Reconciler] Periodic check enabled (every 10m)');
 
       // Initialize risk manager
       this.riskManager = new RiskManager(
         {
-          stopLossPercent: -25,    // Sell if position drops 25%
-          takeProfitPercent: 100,  // Sell if position doubles
+          stopLossPercent: this.config.stopLossPercent,
+          takeProfitPercent: this.config.takeProfitPercent,
           maxTradeAgeSeconds: 60,  // Skip trades older than 1 minute
           maxPriceDiffPercent: parseFloat(process.env.MAX_PRICE_DIFF_PERCENT || '5'),  // Skip if price moved >5% from trader
         },
@@ -220,6 +224,19 @@ export class CopyTradingBot {
         );
         this.timeBasedExitMonitor.startMonitoring();
       }
+
+      // Initialize position watchdog (runs every 60s, validates all positions)
+      this.watchdog = new PositionWatchdog(
+        {
+          checkIntervalMs: 60_000, // Every 1 minute
+          stopLossPercent: this.config.stopLossPercent,
+          takeProfitPercent: this.config.takeProfitPercent,
+        },
+        this.stateManager,
+        this.trader,
+        this.notifier
+      );
+      this.watchdog.start();
     }
 
     // Initialize trade monitor
@@ -246,6 +263,9 @@ export class CopyTradingBot {
 
     this.isRunning = true;
     this.printStatus();
+
+    // Place TP orders for existing positions that don't have them yet
+    await this.placeProtectionOrdersForExistingPositions();
 
     // Send Telegram notification that bot started
     await this.notifier.notifyBotStarted({
@@ -338,7 +358,24 @@ export class CopyTradingBot {
         maxPositionSize: this.config.maxPositionSize,
         minTradeSize: this.config.minTradeSize,
         maxPercentage: this.config.maxPercentagePerTrade,
+        fixedTradePercent: (this.config as any).fixedTradePercent,
       });
+
+      // Update risk manager SL/TP if changed
+      if (this.riskManager) {
+        this.riskManager.updateConfig({
+          stopLossPercent: this.config.stopLossPercent,
+          takeProfitPercent: this.config.takeProfitPercent,
+        });
+      }
+
+      // Update watchdog SL/TP if changed
+      if (this.watchdog) {
+        this.watchdog.updateConfig({
+          stopLossPercent: this.config.stopLossPercent,
+          takeProfitPercent: this.config.takeProfitPercent,
+        });
+      }
 
       // Update trailing stop monitor if percent changed
       if (this.trailingStopMonitor && this.config.trailingStopPercent > 0) {
@@ -704,21 +741,23 @@ export class CopyTradingBot {
       }
 
       finalSize = allocatedSize;
-    } catch (err) {
+    } catch (err: any) {
       console.log(`\n  [Could not calculate position size - skipping]`);
+      console.log(`  Error: ${err?.message || err}`);
       console.log('='.repeat(50) + '\n');
       return;
     }
 
     // For SELL, adjust size to what we actually have
-    if (trade.side === 'SELL' && this.positionManager) {
-      const position = this.positionManager.getPosition(trade.asset);
-      if (position) {
-        // Sell proportionally - if trader sells 50%, we sell 50% of our position
-        const traderSellRatio = parseFloat(String(trade.size)) / 100; // Approximate
-        const ourSellSize = position.size * Math.min(traderSellRatio, 1);
-        finalSize = ourSellSize * tradePrice; // Convert to USD value
-        console.log(`  Adjusted sell: ${ourSellSize.toFixed(4)} shares ($${finalSize.toFixed(2)})`);
+    if (trade.side === 'SELL') {
+      const ourPosition = this.stateManager.getPosition(trade.asset);
+      if (ourPosition) {
+        // Sell our entire position when trader sells (safest approach)
+        // We can't reliably calculate what % of their position they sold
+        // since we don't know their total position size before the sell
+        const ourSellSize = ourPosition.size;
+        finalSize = ourSellSize * tradePrice; // Convert to USD value for the order
+        console.log(`  Selling our position: ${ourSellSize.toFixed(4)} shares ($${finalSize.toFixed(2)})`);
       }
     }
 
@@ -780,6 +819,11 @@ export class CopyTradingBot {
     }
 
     try {
+      // Cancel SL/TP protection orders before selling (so they don't conflict)
+      if (order.trade.side === 'SELL') {
+        await this.cancelProtectionOrders(order.trade.asset);
+      }
+
       const result = await this.trader.copyTrade(order.trade, order.amount);
 
       if (result.success) {
@@ -817,9 +861,23 @@ export class CopyTradingBot {
             }
           );
 
-          // For BUY orders on new positions, set the wallet alias
+          // For BUY orders on new positions, set the wallet alias and place SL/TP orders
           if (order.trade.side === 'BUY') {
             this.stateManager.setPositionWalletAlias(order.trade.asset, order.walletAlias);
+
+            // Place take profit limit order on the exchange
+            // (stop loss handled by polling - limit sell below market fills immediately on Polymarket)
+            await this.placeProtectionOrders(
+              order.trade.asset,
+              result.details.price,
+              result.details.size,
+              order.trade.title,
+            );
+
+            // Update WebSocket subscriptions for trailing stop
+            if (this.trailingStopMonitor) {
+              this.trailingStopMonitor.updateSubscriptions();
+            }
           }
 
           // For SELL orders, record trader stats
@@ -930,6 +988,12 @@ export class CopyTradingBot {
       await this.executeOrder(order);
     } else {
       // Max retries exceeded - mark as permanently failed
+      errorLogger.log('Bot.orderFailed', `${errorMessage} (after ${currentRetryCount} retries)`, {
+        side: order.trade.side,
+        asset: order.trade.asset?.slice(0, 30),
+        title: order.trade.title?.slice(0, 40),
+        amount: order.amount,
+      });
       console.log(`\n❌ Trade failed after ${currentRetryCount} retries: ${errorMessage}`);
       this.stateManager.recordTrade(false, 0);
       this.stateManager.updateOrder(order.id, {
@@ -951,6 +1015,125 @@ export class CopyTradingBot {
   }
 
   /**
+   * Place GTC take profit limit order on the exchange.
+   * Called after a successful BUY order fills.
+   *
+   * NOTE: Stop loss CANNOT be a limit order on Polymarket because a SELL limit
+   * at a price below market would fill immediately (it means "sell at X or better").
+   * Stop loss is handled by polling (RiskManager checks every 60s).
+   * Take profit CAN be a limit order because a SELL at a price above market
+   * will only fill when the price rises to that level.
+   */
+  private async placeProtectionOrders(asset: string, entryPrice: number, shares: number, title: string): Promise<void> {
+    if (!this.trader || this.config.dryRun) return;
+
+    const tpPercent = this.config.takeProfitPercent / 100; // e.g., 150 -> 1.50
+    const takeProfitPrice = Math.min(0.99, Math.round((entryPrice * (1 + tpPercent)) * 100) / 100);
+
+    // Skip if TP price would be at or below current price (would fill immediately)
+    if (takeProfitPrice <= entryPrice) {
+      console.log(`  TP price ($${takeProfitPrice}) <= entry ($${entryPrice}), skipping TP order`);
+      return;
+    }
+
+    console.log(`\n🛡️ Placing take profit order for ${title}:`);
+    console.log(`  Entry: $${entryPrice.toFixed(2)} | Shares: ${shares.toFixed(2)}`);
+    console.log(`  Take Profit: SELL @ $${takeProfitPrice.toFixed(2)} (+${(tpPercent * 100).toFixed(0)}%)`);
+    console.log(`  Stop Loss: handled by polling (${this.config.stopLossPercent}%)`);
+
+    let tpOrderId: string | undefined;
+
+    // Update balance allowance (required after buying before placing GTC sell orders)
+    await this.trader.updateBalanceAllowance();
+
+    // Place take profit limit order
+    try {
+      const tpResult = await this.trader.placeLimitOrder(asset, 'SELL', shares, takeProfitPrice);
+      if (tpResult.success && tpResult.orderId) {
+        tpOrderId = tpResult.orderId;
+        console.log(`  ✅ Take Profit order placed: ${tpOrderId}`);
+      } else {
+        console.log(`  ⚠️ Take Profit order failed: ${tpResult.error}`);
+      }
+    } catch (err: any) {
+      errorLogger.logError('Bot.placeTP', err, { asset: asset?.slice(0, 30), entryPrice, shares });
+      console.error(`  ⚠️ Take Profit order error: ${err?.message}`);
+    }
+
+    // Save order ID to state so we can cancel it later
+    if (tpOrderId) {
+      this.stateManager.setProtectionOrders(asset, undefined, tpOrderId);
+    }
+  }
+
+  /**
+   * Place TP orders for existing positions that don't have them.
+   * Called on startup to cover positions opened before TP feature was added.
+   */
+  private async placeProtectionOrdersForExistingPositions(): Promise<void> {
+    if (!this.trader || this.config.dryRun) return;
+
+    const positions = this.stateManager.getAllPositions().filter(p => p.size > 0.001);
+    if (positions.length === 0) return;
+
+    // Find positions missing TP orders
+    const missing = positions.filter(p => {
+      const { takeProfitOrderId } = this.stateManager.getProtectionOrders(p.asset);
+      return !takeProfitOrderId;
+    });
+
+    if (missing.length === 0) {
+      console.log(`[Startup] All ${positions.length} positions already have TP orders`);
+      return;
+    }
+
+    console.log(`[Startup] Placing TP orders for ${missing.length}/${positions.length} positions...`);
+
+    // Update balance allowance once before placing all orders
+    await this.trader.updateBalanceAllowance();
+
+    let placed = 0;
+    for (const pos of missing) {
+      try {
+        const tpPercent = this.config.takeProfitPercent / 100;
+        const takeProfitPrice = Math.min(0.99, Math.round((pos.avgPrice * (1 + tpPercent)) * 100) / 100);
+
+        if (takeProfitPrice <= pos.avgPrice) continue;
+
+        const tpResult = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
+        if (tpResult.success && tpResult.orderId) {
+          this.stateManager.setProtectionOrders(pos.asset, undefined, tpResult.orderId);
+          placed++;
+          console.log(`  TP placed: ${pos.title?.slice(0, 40)} | SELL @ $${takeProfitPrice} (${pos.size.toFixed(2)} shares)`);
+        } else {
+          console.log(`  TP failed: ${pos.title?.slice(0, 40)} | ${tpResult.error}`);
+        }
+      } catch (err: any) {
+        console.log(`  TP error: ${pos.title?.slice(0, 40)} | ${err?.message}`);
+      }
+    }
+
+    console.log(`[Startup] Placed ${placed}/${missing.length} TP orders`);
+  }
+
+  /**
+   * Cancel any SL/TP protection orders for a position.
+   * Called before selling a position (to avoid double-selling).
+   */
+  private async cancelProtectionOrders(asset: string): Promise<void> {
+    if (!this.trader) return;
+
+    const { stopLossOrderId, takeProfitOrderId } = this.stateManager.getProtectionOrders(asset);
+    const orderIds = [stopLossOrderId, takeProfitOrderId].filter(Boolean) as string[];
+
+    if (orderIds.length > 0) {
+      console.log(`  🗑️ Cancelling ${orderIds.length} protection order(s)...`);
+      await this.trader.cancelOrders(orderIds);
+      this.stateManager.clearProtectionOrders(asset);
+    }
+  }
+
+  /**
    * Force sell a position (called from dashboard)
    */
   private async forceSellPosition(asset: string): Promise<{ success: boolean; error?: string }> {
@@ -965,34 +1148,21 @@ export class CopyTradingBot {
 
     console.log(`\n[Dashboard] Force selling position: ${position.title}`);
 
+    // Cancel SL/TP protection orders first
+    await this.cancelProtectionOrders(asset);
+
     try {
-      // Get current price for the sell
-      const currentPrice = await this.clobApi.getMidpoint(asset);
-      const price = parseFloat(currentPrice);
+      // Get current bid price for the sell
+      const spread = await this.clobApi.getSpread(asset);
+      const price = Math.max(0.01, parseFloat(spread.bid || '0.5'));
 
-      // Create a synthetic trade for the sell
-      const trade = {
-        id: `dashboard-sell-${Date.now()}`,
-        proxyWallet: '',
-        side: 'SELL' as const,
+      // Use dedicated sellPosition method (passes shares correctly, uses FAK)
+      const result = await this.trader.sellPosition(
         asset,
-        conditionId: '',
-        size: String(position.size),
-        price: String(price),
-        timestamp: Math.floor(Date.now() / 1000),
-        title: position.title,
-        slug: position.slug,
-        outcome: position.outcome,
-        outcomeIndex: 0,
-        transactionHash: '',
-        eventSlug: '',
-      };
-
-      // Calculate sell amount
-      const amount = position.size * price;
-
-      // Execute the sell
-      const result = await this.trader.copyTrade(trade, amount);
+        position.size,
+        price,
+        position.title,
+      );
 
       if (result.success) {
         // Capture position info before updating for P&L calculation
@@ -1021,7 +1191,8 @@ export class CopyTradingBot {
         }
 
         // Record successful trade
-        this.stateManager.recordTrade(true, amount);
+        const sellAmount = (result.details?.size || position.size) * (result.details?.price || price);
+        this.stateManager.recordTrade(true, sellAmount);
 
         // Update dashboard last trade time
         if (this.dashboardServer) {
@@ -1033,7 +1204,7 @@ export class CopyTradingBot {
           side: 'SELL',
           title: position.title,
           outcome: position.outcome,
-          amount,
+          amount: sellAmount,
           price: result.details?.price || price,
           size: result.details?.size || position.size,
           orderId: result.orderId,
@@ -1046,6 +1217,7 @@ export class CopyTradingBot {
         return { success: false, error: result.error || 'Trade failed' };
       }
     } catch (err: any) {
+      errorLogger.logError('Bot.forceSell', err, { asset: asset?.slice(0, 30) });
       console.error('[Dashboard] Force sell failed:', err);
       return { success: false, error: err.message || 'Unknown error' };
     }
@@ -1150,6 +1322,10 @@ export class CopyTradingBot {
 
     if (this.timeBasedExitMonitor) {
       this.timeBasedExitMonitor.stopMonitoring();
+    }
+
+    if (this.watchdog) {
+      this.watchdog.stop();
     }
 
     // Stop health check server

@@ -24,6 +24,8 @@ export interface BotState {
       entryTime: number;
       walletAlias?: string; // Track which trader opened this position
       highestPrice?: number; // Highest price reached for trailing stop
+      stopLossOrderId?: string; // GTC limit order ID for stop loss
+      takeProfitOrderId?: string; // GTC limit order ID for take profit
     };
   };
 
@@ -221,7 +223,7 @@ export class StateManager {
         existing.size = newSize;
       }
     } else if (sizeDelta > 0) {
-      // New position
+      // New position - initialize highestPrice to avgPrice so trailing stop can track from entry
       this.state.positions[asset] = {
         asset,
         size: sizeDelta,
@@ -230,6 +232,7 @@ export class StateManager {
         outcome: metadata?.outcome || 'Unknown',
         slug: metadata?.slug || '',
         entryTime: Date.now(),
+        highestPrice: price, // Initialize to entry price so trailing stop works immediately
       };
       console.log(`[StateManager] New position: ${metadata?.title}`);
     }
@@ -425,11 +428,8 @@ export class StateManager {
     const position = this.state.positions[asset];
     if (!position) return false;
 
-    // Only track highest price if position is in profit (currentPrice > avgPrice)
-    if (currentPrice <= position.avgPrice) {
-      return false;
-    }
-
+    // Always track the highest price reached (even before profit)
+    // This allows trailing stop to activate as soon as price rises then drops
     const existingHighest = position.highestPrice || position.avgPrice;
     if (currentPrice > existingHighest) {
       position.highestPrice = currentPrice;
@@ -456,9 +456,8 @@ export class StateManager {
 
     const highestPrice = position.highestPrice;
 
-    // Only trigger if we have a highestPrice set AND position has gained value
-    // (highestPrice is only set when price exceeds avgPrice)
-    if (!highestPrice || highestPrice <= position.avgPrice) {
+    // Need a highestPrice to calculate drop from
+    if (!highestPrice || highestPrice <= 0) {
       return { triggered: false };
     }
 
@@ -564,6 +563,39 @@ export class StateManager {
       return `${hours}h ${minutes}m`;
     }
     return `${minutes}m`;
+  }
+
+  /**
+   * Set the SL/TP order IDs for a position
+   */
+  setProtectionOrders(asset: string, stopLossOrderId?: string, takeProfitOrderId?: string): void {
+    if (this.state.positions[asset]) {
+      if (stopLossOrderId) this.state.positions[asset].stopLossOrderId = stopLossOrderId;
+      if (takeProfitOrderId) this.state.positions[asset].takeProfitOrderId = takeProfitOrderId;
+      this.isDirty = true;
+    }
+  }
+
+  /**
+   * Get the SL/TP order IDs for a position
+   */
+  getProtectionOrders(asset: string): { stopLossOrderId?: string; takeProfitOrderId?: string } {
+    const pos = this.state.positions[asset];
+    return {
+      stopLossOrderId: pos?.stopLossOrderId,
+      takeProfitOrderId: pos?.takeProfitOrderId,
+    };
+  }
+
+  /**
+   * Clear the SL/TP order IDs for a position (called after cancellation)
+   */
+  clearProtectionOrders(asset: string): void {
+    if (this.state.positions[asset]) {
+      delete this.state.positions[asset].stopLossOrderId;
+      delete this.state.positions[asset].takeProfitOrderId;
+      this.isDirty = true;
+    }
   }
 
   /**

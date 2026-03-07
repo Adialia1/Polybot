@@ -196,7 +196,7 @@ export class DashboardServer {
     const uptimeSeconds = Math.floor((Date.now() - this.startTime) / 1000);
     const queueStatus = this.config.orderQueue.getStatus();
     const dailyPnL = this.config.stateManager.getDailyPnL();
-    const positions = this.config.stateManager.getAllPositions();
+    const positions = this.config.stateManager.getAllPositions().filter(p => p.size > 0.001);
 
     this.sendJson(res, 200, {
       status: this.isPaused ? 'paused' : 'running',
@@ -217,7 +217,9 @@ export class DashboardServer {
    * GET /api/positions - Current positions with P&L
    */
   private async handlePositions(res: ServerResponse): Promise<void> {
-    const positions = this.config.stateManager.getAllPositions();
+    const allPositions = this.config.stateManager.getAllPositions();
+    // Only show positions with actual shares (filter out ghost/zero positions)
+    const positions = allPositions.filter(p => p.size > 0.001);
     const positionsWithPnL = [];
 
     for (const pos of positions) {

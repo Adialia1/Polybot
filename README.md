@@ -20,9 +20,10 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 - **Order queue** - Handles multiple signals with deduplication
 
 ### Risk Management
-- **Stop Loss** - Auto-sell positions at configurable loss threshold (default: -25%)
-- **Take Profit** - Auto-sell positions at configurable profit threshold (default: +100%)
-- **Trailing Stop** - Sell when price drops X% from peak (e.g., 15%)
+- **Stop Loss** - Polling-based auto-sell at configurable loss threshold (default: -50%). Checked every 60s using midpoint price. Cannot be a limit order on Polymarket (SELL below market fills immediately).
+- **Take Profit** - GTC limit order placed on the exchange after each buy. Auto-fills when price reaches target (default: +200%, capped at $0.99).
+- **Trailing Stop** - WebSocket + REST polling every 30s. Sells when price drops X% from peak (e.g., 15%).
+- **Position Watchdog** - Runs every 60s to verify all TP orders are still live on exchange. Auto-replaces missing orders. Redundant SL safety net.
 - **Daily Loss Limit** - Stop trading if daily losses exceed limit
 - **Max Open Positions** - Limit concurrent positions
 - **Probability Filter** - Skip trades outside probability range (e.g., 5%-95%)
@@ -40,15 +41,17 @@ A sophisticated trade copying bot for Polymarket that tracks successful traders 
 
 ### Automation
 - **Time-Based Exits** - Auto-sell positions held longer than X hours
-- **Position Reconciliation** - Detect and handle orphaned positions
+- **Position Reconciliation** - Detect and handle orphaned positions every 10 minutes
 - **Retry Logic** - Retry failed orders with exponential backoff
+- **Protection Order Lifecycle** - All sell paths cancel TP orders before selling to prevent double-sells
 
 ### Monitoring & Control
 - **Telegram Notifications** - Alerts for trades, stops, daily summaries
 - **Telegram Bot Commands** - Check status, positions, and stats via chat commands
 - **Health Check Endpoint** - HTTP endpoint for uptime monitoring
-- **Web Dashboard** - Browser UI with positions, trades, P&L, manual controls
-- **Config Hot-Reload** - Update settings without restarting
+- **Web Dashboard** - Browser UI with positions, trades, P&L, manual controls (filters ghost/zero positions)
+- **Config Hot-Reload** - Update settings without restarting (SL/TP/trailing stop included)
+- **Error Log** - All errors written to `data/logs/errors.log` (thread-safe, auto-rotates at 10MB)
 
 ---
 
@@ -119,9 +122,9 @@ TRACK_WALLETS=[{"address":"0x2005d16a...","alias":"RN1","enabled":true,"allocati
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `STOP_LOSS_PERCENT` | Stop loss threshold (negative) | `-25` |
-| `TAKE_PROFIT_PERCENT` | Take profit threshold | `100` |
-| `TRAILING_STOP_PERCENT` | Trailing stop from peak | `0` (disabled) |
+| `STOP_LOSS_PERCENT` | Stop loss threshold (negative, polling-based) | `-50` |
+| `TAKE_PROFIT_PERCENT` | Take profit threshold (GTC limit order on exchange) | `200` |
+| `TRAILING_STOP_PERCENT` | Trailing stop from peak (WebSocket + polling) | `15` |
 | `DAILY_LOSS_LIMIT` | Max daily loss in USD | `0` (disabled) |
 | `MAX_OPEN_POSITIONS` | Max concurrent positions | `0` (unlimited) |
 | `MAX_HOLD_TIME_HOURS` | Auto-sell after X hours | `0` (disabled) |
@@ -300,6 +303,12 @@ npm run test-trade
 
 # Approve USDC spending
 npm run approve
+
+# Test order mechanics (place, verify, cancel)
+npm run test-orders
+
+# Test protection orders (buy, place TP, verify, cancel, sell)
+npm run test-protection
 ```
 
 ---
@@ -324,8 +333,8 @@ MIN_TRADE_SIZE=1
 
 # === RISK MANAGEMENT ===
 DRY_RUN=true
-STOP_LOSS_PERCENT=-25
-TAKE_PROFIT_PERCENT=100
+STOP_LOSS_PERCENT=-50
+TAKE_PROFIT_PERCENT=200
 TRAILING_STOP_PERCENT=15
 DAILY_LOSS_LIMIT=50
 MAX_OPEN_POSITIONS=10
@@ -370,15 +379,17 @@ polybot/
 │   │   ├── tradeMonitor.ts    # Polls traders for new trades
 │   │   ├── trader.ts          # Executes trades via CLOB API
 │   │   ├── orderQueue.ts      # Order queue with deduplication
-│   │   ├── riskManager.ts     # Stop loss, take profit monitoring
-│   │   ├── trailingStopMonitor.ts  # Trailing stop monitoring
+│   │   ├── riskManager.ts     # Stop loss (polling) and take profit monitoring
+│   │   ├── trailingStopMonitor.ts  # Trailing stop (WebSocket + REST polling)
+│   │   ├── positionWatchdog.ts     # Watchdog: verifies TP orders, replaces missing
 │   │   ├── timeBasedExitMonitor.ts # Time-based exit monitoring
 │   │   ├── positionReconciler.ts   # Orphaned position detection
 │   │   ├── tradeFilter.ts     # Blacklist/whitelist filtering
 │   │   ├── notifier.ts        # Telegram notifications
 │   │   ├── healthCheck.ts     # HTTP health endpoint
 │   │   ├── dashboard.ts       # Web dashboard
-│   │   └── configLoader.ts    # Config file with hot-reload
+│   │   ├── configLoader.ts    # Config file with hot-reload
+│   │   └── errorLogger.ts     # Thread-safe error log to file
 │   ├── scripts/
 │   │   ├── status.ts          # Status command
 │   │   ├── sellPosition.ts    # Manual sell command
@@ -387,7 +398,8 @@ polybot/
 │       └── polymarket.ts      # TypeScript interfaces
 ├── data/
 │   ├── state.json             # Persisted bot state
-│   └── config.json            # Optional config file
+│   ├── config.json            # Optional config file
+│   └── logs/errors.log        # Error log (auto-created, auto-rotated)
 └── .env                       # Environment variables
 ```
 
@@ -397,12 +409,13 @@ polybot/
 
 The bot saves state to `data/state.json` every 30 seconds and on shutdown:
 
-- **Positions** - Current positions with entry price, size, trader
+- **Positions** - Current positions with entry price, size, trader, highest price, TP order ID
 - **Orders** - Recent order history (last 100)
 - **Stats** - Total trades, volume, success rate
 - **Daily P&L** - Cumulative profit/loss for today
 - **Trader Stats** - Per-trader P&L, win rate, hold time
 - **Last Seen Trades** - Timestamps to avoid duplicate processing
+- **Protection Orders** - TP limit order IDs per position (for cancellation on sell)
 
 State survives crashes and restarts.
 
@@ -413,11 +426,13 @@ State survives crashes and restarts.
 1. **Monitor** - Polls each tracked wallet's activity every second
 2. **Detect** - Identifies new BUY/SELL trades since last check
 3. **Filter** - Applies probability, blacklist, whitelist, conflict checks
-4. **Size** - Calculates position size based on trader's % and your limits
+4. **Size** - Calculates position size (fixed % or proportional to trader)
 5. **Queue** - Adds order to queue with deduplication
-6. **Execute** - Places limit order via Polymarket CLOB API
-7. **Track** - Updates local position state
-8. **Monitor** - Watches positions for stop loss, take profit, trailing stop
+6. **Execute** - BUY uses FOK (fill-or-kill), SELL uses FAK (fill-and-kill)
+7. **Protect** - After BUY: updates balance allowance, places GTC take profit limit order
+8. **Track** - Updates local position state with entry price and TP order ID
+9. **Monitor** - Watchdog (every 60s) verifies TP orders, RiskManager checks SL, TrailingStop monitors peaks
+10. **Exit** - On any sell: cancels TP order first, then executes market sell
 
 ---
 
@@ -451,8 +466,13 @@ State survives crashes and restarts.
 
 ### Bot Crashes
 - State is auto-saved, restart will resume
-- Check logs for error messages
+- Check `data/logs/errors.log` for detailed error history
 - Verify API credentials are valid
+
+### TP Order Disappeared
+- The Watchdog checks every 60s and auto-replaces missing TP orders
+- Check error log for `Watchdog.replaceTP` entries
+- You'll get a Telegram alert when TP orders are replaced
 
 ---
 

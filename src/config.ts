@@ -18,7 +18,7 @@ export const defaultConfig: CopyConfig = {
     },
   ],
   pollingIntervalMs: 1000, // Poll every 1 second
-  copyDelayMs: 500, // Delay before copying trade
+  copyDelayMs: 100, // Delay before copying trade (keep low for speed)
   maxPositionSize: 10, // Max $10 per position (for $30 account)
   minTradeSize: 1, // Minimum $1 trade size
   userAccountSize: 30, // Your account size in USD
@@ -38,6 +38,9 @@ export const defaultConfig: CopyConfig = {
   retryDelayMs: 2000, // Base delay between retries (uses exponential backoff)
   // Daily loss limit
   dailyLossLimit: 0, // Max daily loss in USD (0 = disabled)
+  // Stop loss / Take profit
+  stopLossPercent: -25, // Sell if position drops 25% (default: -25%)
+  takeProfitPercent: 100, // Sell if position doubles (default: +100%)
   // Trailing stop loss
   trailingStopPercent: 15, // Sell if price drops 15% from peak (0 = disabled)
   trailingStopCheckIntervalMs: 60000, // Check every 60 seconds
@@ -157,6 +160,15 @@ function loadConfigFromEnv(): CopyConfig {
   // Max open positions (0 = unlimited)
   if (process.env.MAX_OPEN_POSITIONS) {
     config.maxOpenPositions = parseInt(process.env.MAX_OPEN_POSITIONS, 10);
+  }
+
+  // Stop loss / Take profit
+  if (process.env.STOP_LOSS_PERCENT) {
+    config.stopLossPercent = parseFloat(process.env.STOP_LOSS_PERCENT);
+  }
+
+  if (process.env.TAKE_PROFIT_PERCENT) {
+    config.takeProfitPercent = parseFloat(process.env.TAKE_PROFIT_PERCENT);
   }
 
   // Trailing stop loss (0 = disabled)

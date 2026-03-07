@@ -24,17 +24,19 @@ export class PositionSizer {
   private dataApi: DataApiClient;
   private onchainClient: OnchainClient;
   private traderProfiles: Map<string, TraderProfile> = new Map();
-  private profileCacheTtl = 60000; // Cache for 1 minute
+  private profileCacheTtl = 600000; // Cache for 10 minutes
   private userAccountSize: number;
   private maxPositionSize: number;
   private minTradeSize: number;
   private maxPercentage: number;
+  private fixedTradePercent?: number;
 
   constructor(config: {
     userAccountSize: number;
     maxPositionSize: number;
     minTradeSize: number;
     maxPercentage?: number; // Max % of your account per trade (safety)
+    fixedTradePercent?: number; // If set, use fixed % per trade instead of proportional
   }) {
     this.dataApi = new DataApiClient();
     this.onchainClient = new OnchainClient();
@@ -42,6 +44,7 @@ export class PositionSizer {
     this.maxPositionSize = config.maxPositionSize;
     this.minTradeSize = config.minTradeSize;
     this.maxPercentage = config.maxPercentage || 10; // Default 10% max per trade
+    this.fixedTradePercent = config.fixedTradePercent;
   }
 
   async getTraderProfile(walletAddress: string): Promise<TraderProfile> {
@@ -125,12 +128,22 @@ export class PositionSizer {
       tradePercentage = (originalTradeValue / traderProfile.totalValue) * 100;
     }
 
-    // Apply percentage to your account
-    let recommendedSize = (tradePercentage / 100) * this.userAccountSize;
+    // Determine sizing method
+    let recommendedSize: number;
+    let reason: string;
+
+    if (this.fixedTradePercent !== undefined && this.fixedTradePercent > 0) {
+      // Fixed percentage mode - ignore trader's account size
+      recommendedSize = (this.fixedTradePercent / 100) * this.userAccountSize;
+      reason = `fixed ${this.fixedTradePercent}% per trade`;
+    } else {
+      // Proportional mode - scale based on trader's trade percentage
+      recommendedSize = (tradePercentage / 100) * this.userAccountSize;
+      reason = 'proportional';
+    }
 
     // Apply caps and floors
     let cappedSize = recommendedSize;
-    let reason = 'proportional';
 
     // Cap at max position size
     if (cappedSize > this.maxPositionSize) {
