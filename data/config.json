@@ -3,7 +3,7 @@
   "enableTrading": true,
   "userAccountSize": 25,
   "maxPositionSize": 2,
-  "minTradeSize": 0.2,
+  "minTradeSize": 1,
   "fixedTradePercent": 10,
   "minProbability": 0.05,
   "maxProbability": 0.95,
