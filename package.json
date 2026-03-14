@@ -51,7 +51,7 @@
   },
   "homepage": "https://github.com/Adialia1/polybot#readme",
   "dependencies": {
-    "@polymarket/clob-client": "5.7.0",
+    "@polymarket/clob-client": "5.8.0",
     "@scure/bip32": "2.0.1",
     "@scure/bip39": "2.0.1",
     "@types/node": "25.3.5",
