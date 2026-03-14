@@ -60,7 +60,7 @@
     "node-telegram-bot-api": "^0.67.0",
     "tsx": "4.21.0",
     "typescript": "5.9.3",
-    "viem": "2.47.0",
+    "viem": "2.47.2",
     "ws": "8.19.0"
   },
   "devDependencies": {
