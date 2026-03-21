@@ -106,6 +106,19 @@ export class OrderQueue extends EventEmitter {
     const nextOrder = this.queue.find(o => o.status === 'pending');
     if (!nextOrder) return;
 
+    // Skip stale orders older than 1 minute — price has moved, no point executing
+    const ageMs = Date.now() - nextOrder.createdAt;
+    if (ageMs > 60000) {
+      nextOrder.status = 'skipped';
+      nextOrder.reason = `stale (${(ageMs / 1000).toFixed(0)}s old)`;
+      nextOrder.processedAt = Date.now();
+      console.log(`[OrderQueue] Skipped stale order: ${nextOrder.id} (${(ageMs / 1000).toFixed(0)}s old)`);
+      this.emit('skip', nextOrder);
+      // Try next order
+      setTimeout(() => this.processNext(), 0);
+      return;
+    }
+
     this.processing.add(nextOrder.id);
     nextOrder.status = 'processing';
 
