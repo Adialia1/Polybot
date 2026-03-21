@@ -34,6 +34,7 @@ export class CopyTradingBot {
   private stateManager: StateManager;
   private reconciler: PositionReconciler | null = null;
   private reconcileInterval: NodeJS.Timeout | null = null;
+  private resolvedSellInterval: NodeJS.Timeout | null = null;
   private riskManager: RiskManager | null = null;
   private trailingStopMonitor: TrailingStopMonitor | null = null;
   private timeBasedExitMonitor: TimeBasedExitMonitor | null = null;
@@ -285,6 +286,9 @@ export class CopyTradingBot {
 
     this.isRunning = true;
     this.printStatus();
+
+    // Start auto-sell for resolved positions (>= $0.98)
+    this.startResolvedPositionSeller();
 
     // Place TP orders for existing positions that don't have them yet
     await this.placeProtectionOrdersForExistingPositions();
@@ -1258,6 +1262,40 @@ export class CopyTradingBot {
       console.log(`  🗑️ Cancelling ${orderIds.length} protection order(s)...`);
       await this.trader.cancelOrders(orderIds);
       this.stateManager.clearProtectionOrders(asset);
+    }
+  }
+
+  /**
+   * Auto-sell positions at >= 98c to free up capital for new trades.
+   * Resolved/near-resolved markets are dead money — sell them fast.
+   */
+  private startResolvedPositionSeller(): void {
+    const intervalMs = 120_000; // Every 2 minutes
+    console.log(`[AutoSell] Started — will sell positions at >= $0.98 every ${intervalMs / 1000}s`);
+
+    this.resolvedSellInterval = setInterval(() => this.sellResolvedPositions(), intervalMs);
+    // First check after 30s
+    setTimeout(() => this.sellResolvedPositions(), 30_000);
+  }
+
+  private async sellResolvedPositions(): Promise<void> {
+    if (!this.trader || this.config.dryRun) return;
+
+    const positions = this.stateManager.getAllPositions().filter(p => p.size > 0.5);
+    if (positions.length === 0) return;
+
+    for (const pos of positions) {
+      try {
+        const spread = await this.clobApi.getSpread(pos.asset);
+        const bid = parseFloat(spread.bid || '0');
+
+        if (bid >= 0.98) {
+          console.log(`[AutoSell] ${pos.title?.slice(0, 40)} at $${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares to free capital`);
+          await this.forceSellPosition(pos.asset);
+        }
+      } catch {
+        // Skip — will retry next cycle
+      }
     }
   }
 
