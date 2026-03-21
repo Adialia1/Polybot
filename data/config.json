@@ -7,6 +7,9 @@
   "fixedTradePercent": 0,
   "minProbability": 0.05,
   "maxProbability": 0.95,
+  "maxPriceDiffPercent": 15,
+  "orderSlippagePercent": 15,
+  "minTraderTradeUsd": 25,
   "trailingStopPercent": 0,
   "trailingStopCheckIntervalMs": 15000,
   "stopLossPercent": -9999,
@@ -23,6 +26,9 @@
   "healthCheckPort": 3333,
   "dashboardEnabled": true,
   "dashboardPort": 8888,
+  "telegramBotToken": "8760479636:AAEnP83lBse6zIwcKESGyKaU1IpKezjJKwY",
+  "telegramChatId": "828932128",
+  "signatureType": 1,
   "trackWallets": [
     {
       "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",

@@ -57,8 +57,20 @@ export class TelegramNotifier {
   private startTime: number = Date.now();
 
   constructor(stateManager?: StateManager) {
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
+    // Read from config.json first, fall back to env
+    let cfgToken: string | undefined;
+    let cfgChatId: string | undefined;
+    try {
+      const { readFileSync, existsSync } = require('fs');
+      const configPath = './data/config.json';
+      if (existsSync(configPath)) {
+        const cfg = JSON.parse(readFileSync(configPath, 'utf-8'));
+        cfgToken = cfg.telegramBotToken;
+        cfgChatId = cfg.telegramChatId;
+      }
+    } catch { /* ignore */ }
+    const token = cfgToken || process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = cfgChatId || process.env.TELEGRAM_CHAT_ID;
 
     if (stateManager) {
       this.stateManager = stateManager;

@@ -112,6 +112,18 @@ export interface ConfigFileSchema {
   // Web Dashboard
   dashboardEnabled?: boolean;
   dashboardPort?: number;
+
+  // Trade filters
+  maxPriceDiffPercent?: number;
+  orderSlippagePercent?: number;
+  minTraderTradeUsd?: number;
+
+  // Wallet settings
+  signatureType?: number;
+
+  // Telegram
+  telegramBotToken?: string;
+  telegramChatId?: string;
 }
 
 /**
@@ -387,6 +399,26 @@ export class ConfigLoader extends EventEmitter {
       } else {
         errors.push('dashboardPort must be a valid port number (1-65535)');
       }
+    }
+
+    // Trade filter settings
+    if (schema.maxPriceDiffPercent !== undefined) {
+      (config as any).maxPriceDiffPercent = schema.maxPriceDiffPercent;
+    }
+    if (schema.orderSlippagePercent !== undefined) {
+      (config as any).orderSlippagePercent = schema.orderSlippagePercent;
+    }
+    if (schema.minTraderTradeUsd !== undefined) {
+      (config as any).minTraderTradeUsd = schema.minTraderTradeUsd;
+    }
+    if (schema.signatureType !== undefined) {
+      (config as any).signatureType = schema.signatureType;
+    }
+    if (schema.telegramBotToken !== undefined) {
+      (config as any).telegramBotToken = schema.telegramBotToken;
+    }
+    if (schema.telegramChatId !== undefined) {
+      (config as any).telegramChatId = schema.telegramChatId;
     }
 
     // String array settings

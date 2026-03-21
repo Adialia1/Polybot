@@ -141,6 +141,8 @@ export class CopyTradingBot {
         privateKey: this.config.privateKey,
         funderAddress: this.config.funderAddress,
         dryRun: this.config.dryRun,
+        signatureType: this.config.signatureType,
+        orderSlippagePercent: this.config.orderSlippagePercent,
         apiCredentials,
       });
 
@@ -190,7 +192,7 @@ export class CopyTradingBot {
           stopLossPercent: this.config.stopLossPercent,
           takeProfitPercent: this.config.takeProfitPercent,
           maxTradeAgeSeconds: 60,  // Skip trades older than 1 minute
-          maxPriceDiffPercent: parseFloat(process.env.MAX_PRICE_DIFF_PERCENT || '5'),  // Skip if price moved >5% from trader
+          maxPriceDiffPercent: this.config.maxPriceDiffPercent ?? parseFloat(process.env.MAX_PRICE_DIFF_PERCENT || '5'),
         },
         this.stateManager,
         this.trader,
@@ -756,7 +758,7 @@ export class CopyTradingBot {
     console.log(`Price: $${trade.price} (${(tradePrice * 100).toFixed(1)}% probability)`);
 
     // Filter out small hedge legs — only copy conviction trades
-    const minTraderTradeUsd = parseFloat(process.env.MIN_TRADER_TRADE_USD || '0');
+    const minTraderTradeUsd = this.config.minTraderTradeUsd ?? parseFloat(process.env.MIN_TRADER_TRADE_USD || '0');
     const traderTradeValue = parseFloat(String(trade.size)) * tradePrice;
     if (minTraderTradeUsd > 0 && traderTradeValue < minTraderTradeUsd) {
       console.log(`\n⏭️  Skipping (trader bet $${traderTradeValue.toFixed(2)} < $${minTraderTradeUsd} min)`);

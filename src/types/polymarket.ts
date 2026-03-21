@@ -141,4 +141,11 @@ export interface CopyConfig {
   // Web Dashboard
   dashboardEnabled: boolean; // Enable web dashboard server
   dashboardPort: number; // Port for web dashboard (default: 8080)
+  // Trade filters (configurable via config.json)
+  maxPriceDiffPercent?: number; // Skip if price moved >X% unfavorably (default: 5)
+  orderSlippagePercent?: number; // Slippage tolerance for market orders (default: 15)
+  minTraderTradeUsd?: number; // Skip trader trades below $X (filters hedge legs, default: 0)
+  signatureType?: number; // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
+  telegramBotToken?: string; // Telegram bot token
+  telegramChatId?: string; // Telegram chat ID
 }

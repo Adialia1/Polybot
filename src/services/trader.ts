@@ -11,6 +11,8 @@ export interface TraderConfig {
   privateKey: string;
   funderAddress?: string; // Proxy wallet address (if different from signer)
   dryRun?: boolean; // If true, don't actually execute trades
+  signatureType?: number; // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
+  orderSlippagePercent?: number; // Slippage tolerance for market orders
   apiCredentials?: {
     key: string;
     secret: string;
@@ -44,15 +46,20 @@ const GNOSIS_SAFE_SIGNATURE_TYPE = 2;
 // BUY: allow price up to X% above trader's price to ensure fill
 // SELL: allow price down to X% below target price
 // Polymarket moves fast, especially sports markets. 5% is too low for copy trading.
-const MARKET_ORDER_SLIPPAGE = parseFloat(process.env.ORDER_SLIPPAGE_PERCENT || '15') / 100;
+// Default slippage, can be overridden by config
+const DEFAULT_SLIPPAGE = 0.15;
 
 export class Trader {
   private client: ClobClient | null = null;
   private config: TraderConfig;
   private isInitialized = false;
+  private slippage: number;
 
   constructor(config: TraderConfig) {
     this.config = config;
+    this.slippage = config.orderSlippagePercent !== undefined
+      ? config.orderSlippagePercent / 100
+      : DEFAULT_SLIPPAGE;
   }
 
   async initialize(): Promise<void> {
@@ -75,7 +82,9 @@ export class Trader {
       // 2 = GNOSIS_SAFE (browser wallet like MetaMask with proxy)
       const sigTypeNames = ['EOA (0)', 'Poly Proxy (1)', 'Gnosis Safe (2)'];
       let sigType: number;
-      if (process.env.SIGNATURE_TYPE !== undefined && process.env.SIGNATURE_TYPE !== '') {
+      if (this.config.signatureType !== undefined) {
+        sigType = this.config.signatureType;
+      } else if (process.env.SIGNATURE_TYPE !== undefined && process.env.SIGNATURE_TYPE !== '') {
         sigType = parseInt(process.env.SIGNATURE_TYPE, 10);
       } else {
         sigType = funderAddress.toLowerCase() !== account.address.toLowerCase()
@@ -328,8 +337,8 @@ export class Trader {
     // IMPORTANT: Add slippage tolerance to the price limit! The trader's execution price
     // is often stale by the time we copy. Without tolerance, orders won't fill if
     // the market moved even 1 cent above the trader's price.
-    const buyPriceLimit = Math.min(0.99, price * (1 + MARKET_ORDER_SLIPPAGE));
-    console.log(`[Trader] BUY price limit: $${buyPriceLimit.toFixed(4)} (trader: $${price.toFixed(4)}, +${(MARKET_ORDER_SLIPPAGE * 100).toFixed(0)}% slippage)`);
+    const buyPriceLimit = Math.min(0.99, price * (1 + this.slippage));
+    console.log(`[Trader] BUY price limit: $${buyPriceLimit.toFixed(4)} (trader: $${price.toFixed(4)}, +${(this.slippage * 100).toFixed(0)}% slippage)`);
 
     const result = await this.client.createAndPostMarketOrder(
       {
@@ -452,8 +461,8 @@ export class Trader {
     if (!this.client) return { success: false, error: 'Client not initialized' };
 
     // For SELL: amount is number of shares to sell (NOT USD!)
-    const sellPriceLimit = Math.max(0.01, minPrice * (1 - MARKET_ORDER_SLIPPAGE));
-    console.log(`[Trader] SELL price limit: $${sellPriceLimit.toFixed(4)} (target: $${minPrice.toFixed(4)}, -${(MARKET_ORDER_SLIPPAGE * 100).toFixed(0)}% slippage)`);
+    const sellPriceLimit = Math.max(0.01, minPrice * (1 - this.slippage));
+    console.log(`[Trader] SELL price limit: $${sellPriceLimit.toFixed(4)} (target: $${minPrice.toFixed(4)}, -${(this.slippage * 100).toFixed(0)}% slippage)`);
 
     const result = await this.client.createAndPostMarketOrder(
       {
