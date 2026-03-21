@@ -812,23 +812,11 @@ export class CopyTradingBot {
       }
     }
 
-    // Check market liquidity before trading
+    // Log market liquidity (informational only — FAK + price limit handles thin books)
     try {
       const spread = await this.clobApi.getSpread(trade.asset);
-      const bidPrice = parseFloat(spread.bid);
-      const askPrice = parseFloat(spread.ask);
-      const spreadValue = parseFloat(spread.spread);
-      console.log(`\n💹 Current Market:`);
-      console.log(`  Bid: $${spread.bid} | Ask: $${spread.ask} | Spread: $${spread.spread}`);
-
-      // Skip if order book has no real liquidity (spread > 50% or bid is dust)
-      if (trade.side === 'BUY' && (spreadValue > 0.50 || bidPrice <= 0.01)) {
-        console.log(`\n⏭️  Skipping trade - no liquidity (spread: $${spread.spread})`);
-        console.log('='.repeat(50) + '\n');
-        return;
-      }
+      console.log(`\n💹 Current Market: Bid: $${spread.bid} | Ask: $${spread.ask} | Spread: $${spread.spread}`);
     } catch (err) {
-      // If we can't check liquidity, proceed anyway
       console.log(`\n💹 Could not check market liquidity`);
     }
 
