@@ -1387,8 +1387,19 @@ export class CopyTradingBot {
           continue;
         }
 
-        // Case 2: Data API says current price is near zero (we lost)
+        // Case 2: Current price >= 98¢ — take profit! Market still active, sell on CLOB
         const apiPrice = parseFloat(apiPos?.curPrice || '0');
+        if (apiPos && apiPrice >= 0.98) {
+          const spread = await this.clobApi.getSpread(pos.asset);
+          const bid = parseFloat(spread.bid || '0');
+          if (bid >= 0.90) {
+            console.log(`[AutoSell] ${label} price=$${apiPrice.toFixed(2)}, bid=$${bid.toFixed(2)} — taking profit! Selling ${pos.size.toFixed(1)} shares`);
+            await this.forceSellPosition(pos.asset);
+            continue;
+          }
+        }
+
+        // Case 3: Data API says current price is near zero (we lost)
         if (apiPos && apiPrice <= 0.02 && pos.avgPrice > 0.05) {
           console.log(`[AutoSell] ${label} LOST (price $${apiPrice.toFixed(3)}, entry $${pos.avgPrice.toFixed(3)}) — removing dead position`);
           this.stateManager.updatePosition(pos.asset, -pos.size, apiPrice);
@@ -1397,12 +1408,10 @@ export class CopyTradingBot {
           continue;
         }
 
-        // Case 3: Fallback — check CLOB bid directly (no data API info)
+        // Case 4: Fallback — check CLOB bid directly (no data API info)
         const spread = await this.clobApi.getSpread(pos.asset);
         const bid = parseFloat(spread.bid || '0');
 
-        // SAFETY: ONLY sell when actual BID >= $0.95
-        // This is the real price someone will pay. Empty books show $0.01.
         if (bid >= 0.95) {
           console.log(`[AutoSell] ${label} bid=$${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares`);
           await this.forceSellPosition(pos.asset);
