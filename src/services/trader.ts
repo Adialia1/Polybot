@@ -69,14 +69,23 @@ export class Trader {
       const account = privateKeyToAccount(this.config.privateKey as `0x${string}`);
       const funderAddress = this.config.funderAddress || account.address;
 
-      // Determine signature type based on whether funder differs from signer
-      const sigType = funderAddress.toLowerCase() !== account.address.toLowerCase()
-        ? GNOSIS_SAFE_SIGNATURE_TYPE // Browser wallet with proxy: signer != funder (most common)
-        : EOA_SIGNATURE_TYPE;        // Standalone wallet: signer == funder
+      // Signature type: configurable via SIGNATURE_TYPE env var, or auto-detect
+      // 0 = EOA (standalone wallet, signer IS funder)
+      // 1 = POLY_PROXY (email/Magic Link login, exported PK from Polymarket)
+      // 2 = GNOSIS_SAFE (browser wallet like MetaMask with proxy)
+      const sigTypeNames = ['EOA (0)', 'Poly Proxy (1)', 'Gnosis Safe (2)'];
+      let sigType: number;
+      if (process.env.SIGNATURE_TYPE !== undefined && process.env.SIGNATURE_TYPE !== '') {
+        sigType = parseInt(process.env.SIGNATURE_TYPE, 10);
+      } else {
+        sigType = funderAddress.toLowerCase() !== account.address.toLowerCase()
+          ? GNOSIS_SAFE_SIGNATURE_TYPE
+          : EOA_SIGNATURE_TYPE;
+      }
 
       console.log('[Trader] Signer:', account.address);
       console.log('[Trader] Funder (proxy):', funderAddress);
-      console.log('[Trader] Signature type:', sigType === GNOSIS_SAFE_SIGNATURE_TYPE ? 'Gnosis Safe / Browser Proxy (2)' : 'EOA (0)');
+      console.log('[Trader] Signature type:', sigTypeNames[sigType] || `Unknown (${sigType})`);
 
       // Create wallet client (required by ClobClient)
       const walletClient = createWalletClient({
