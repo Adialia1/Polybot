@@ -63,6 +63,8 @@ export interface ConfigFileSchema {
   userAccountSize?: number;
   maxPercentagePerTrade?: number;
   fixedTradePercent?: number; // If set, use fixed % per trade instead of proportional
+  addOnSize?: number; // Smaller trade size when adding to existing positions
+  maxPositionValue?: number; // Max total dollars spent per position (0 = unlimited)
 
   // Wallets to track
   trackWallets?: Array<{
@@ -269,10 +271,26 @@ export class ConfigLoader extends EventEmitter {
     }
 
     if (schema.fixedTradePercent !== undefined) {
-      if (typeof schema.fixedTradePercent === 'number' && schema.fixedTradePercent > 0 && schema.fixedTradePercent <= 100) {
+      if (typeof schema.fixedTradePercent === 'number' && schema.fixedTradePercent >= 0 && schema.fixedTradePercent <= 100) {
         (config as any).fixedTradePercent = schema.fixedTradePercent;
       } else {
         errors.push('fixedTradePercent must be between 0 and 100');
+      }
+    }
+
+    if (schema.addOnSize !== undefined) {
+      if (typeof schema.addOnSize === 'number' && schema.addOnSize >= 0) {
+        (config as any).addOnSize = schema.addOnSize;
+      } else {
+        errors.push('addOnSize must be a non-negative number');
+      }
+    }
+
+    if (schema.maxPositionValue !== undefined) {
+      if (typeof schema.maxPositionValue === 'number' && schema.maxPositionValue >= 0) {
+        (config as any).maxPositionValue = schema.maxPositionValue;
+      } else {
+        errors.push('maxPositionValue must be a non-negative number');
       }
     }
 
