@@ -10,7 +10,7 @@
   "minProbability": 0.05,
   "maxProbability": 0.95,
   "maxPriceDiffPercent": 15,
-  "orderSlippagePercent": 15,
+  "orderSlippagePercent": 10,
   "minTraderTradeUsd": 20,
   "trailingStopPercent": 0,
   "trailingStopCheckIntervalMs": 15000,
