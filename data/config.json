@@ -16,7 +16,7 @@
   "trailingStopCheckIntervalMs": 15000,
   "stopLossPercent": -9999,
   "takeProfitPercent": 9999,
-  "dailyLossLimit": 1000,
+  "dailyLossLimit": 0,
   "maxOpenPositions": 999,
   "maxRetries": 3,
   "retryDelayMs": 1000,
