@@ -44,6 +44,9 @@ export class OrderQueue extends EventEmitter {
     walletAddress: string,
     amount: number
   ): QueuedOrder | null {
+    // Clean up completed/failed/skipped orders to prevent queue from filling up
+    this.queue = this.queue.filter(o => o.status === 'pending' || o.status === 'processing');
+
     if (this.queue.length >= this.config.maxQueueSize!) {
       console.warn('[OrderQueue] Queue full, dropping order');
       return null;
