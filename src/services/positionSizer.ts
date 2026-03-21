@@ -161,7 +161,7 @@ export class PositionSizer {
 
     // Floor at min trade size (USD minimum)
     if (cappedSize < this.minTradeSize) {
-      if (recommendedSize >= 0.5) {
+      if (recommendedSize >= 0.1) {
         // Trade is meaningful but below minimum - bump up
         cappedSize = this.minTradeSize;
         reason = `raised to min $${this.minTradeSize}`;
