@@ -240,7 +240,12 @@ export class CopyTradingBot {
         this.trader,
         this.notifier
       );
-      this.watchdog.start();
+      // Only start watchdog if TP/SL are actually configured
+      if (this.config.takeProfitPercent < 9999 || this.config.stopLossPercent > -9999) {
+        this.watchdog.start();
+      } else {
+        console.log('[Watchdog] Disabled (SL/TP not configured)');
+      }
     }
 
     // Initialize trade monitor
@@ -1100,6 +1105,9 @@ export class CopyTradingBot {
   private async placeProtectionOrders(asset: string, entryPrice: number, shares: number, title: string): Promise<void> {
     if (!this.trader || this.config.dryRun) return;
 
+    // Skip TP placement if disabled (takeProfitPercent >= 9999)
+    if (this.config.takeProfitPercent >= 9999) return;
+
     const tpPercent = this.config.takeProfitPercent / 100; // e.g., 150 -> 1.50
     const takeProfitPrice = Math.min(0.99, Math.round((entryPrice * (1 + tpPercent)) * 100) / 100);
 
@@ -1164,6 +1172,7 @@ export class CopyTradingBot {
    */
   private async placeProtectionOrdersForExistingPositions(): Promise<void> {
     if (!this.trader || this.config.dryRun) return;
+    if (this.config.takeProfitPercent >= 9999) return;
 
     const positions = this.stateManager.getAllPositions().filter(p => p.size > 0.001);
     if (positions.length === 0) return;
