@@ -63,6 +63,7 @@ export class PositionManager extends EventEmitter {
 
       for (const pos of data) {
         newPositions.set(pos.asset, {
+          ...pos,
           asset: pos.asset,
           size: pos.size,
           avgPrice: pos.avgPrice || 0,

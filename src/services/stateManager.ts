@@ -328,15 +328,28 @@ export class StateManager {
   syncPositionsFromApi(apiPositions: any[]): void {
     // Update existing positions with fresh data
     for (const pos of apiPositions) {
+      const totalBought = parseFloat(pos.totalBought || '0');
+      const avgPrice = parseFloat(pos.avgPrice || '0');
+
       if (this.state.positions[pos.asset]) {
-        // Update size from API (source of truth)
+        // Update from API (source of truth)
         this.state.positions[pos.asset].size = pos.size;
+        // Always sync totalCost from API's totalBought — it's the authoritative value
+        if (totalBought > 0) {
+          this.state.positions[pos.asset].totalCost = totalBought;
+        }
+        // Sync conditionId if missing
+        if (!this.state.positions[pos.asset].conditionId && pos.conditionId) {
+          this.state.positions[pos.asset].conditionId = pos.conditionId;
+        }
       } else {
         // Position exists on API but not locally - add it
         this.state.positions[pos.asset] = {
           asset: pos.asset,
           size: pos.size,
-          avgPrice: pos.avgPrice || 0,
+          avgPrice: avgPrice,
+          totalCost: totalBought > 0 ? totalBought : (pos.size * avgPrice),
+          conditionId: pos.conditionId,
           title: pos.title,
           outcome: pos.outcome,
           slug: pos.slug,
