@@ -693,12 +693,16 @@ export class CopyTradingBot {
     }
 
     // Dedup: skip duplicate BUY signals for same asset within 30s window
+    // Set timestamp IMMEDIATELY to block concurrent signals from the same polling batch
     if (trade.side === 'BUY') {
       const lastProcessed = this.recentBuyDedup.get(trade.asset);
       if (lastProcessed && Date.now() - lastProcessed < DEDUP_WINDOW_MS) {
         console.log(`[Dedup] Skipped duplicate BUY on "${trade.title}" (last processed ${((Date.now() - lastProcessed) / 1000).toFixed(1)}s ago)`);
         return;
       }
+      // Lock immediately — prevents race condition where multiple fills from the same
+      // RN1 order all pass dedup before any of them set the timestamp
+      this.recentBuyDedup.set(trade.asset, Date.now());
     }
 
     // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
@@ -850,10 +854,6 @@ export class CopyTradingBot {
 
     // Queue the order
     if (this.config.enableTrading && finalSize > 0) {
-      // Mark asset as recently processed to prevent burst duplicates
-      if (trade.side === 'BUY') {
-        this.recentBuyDedup.set(trade.asset, Date.now());
-      }
       this.orderQueue.enqueue(trade, wallet.alias, wallet.address, finalSize);
       console.log(`\n📋 Order queued`);
     } else if (!this.config.enableTrading) {
