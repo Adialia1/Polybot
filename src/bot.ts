@@ -720,18 +720,34 @@ export class CopyTradingBot {
       }
     }
 
-    // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
-    // Uses totalCost + pending queue orders to prevent overshoot from concurrent signals
+    // Per-position cap: check ACTUAL position value from Polymarket API + pending queue orders
     const maxPosValue = (this.config as any).maxPositionValue || 0;
     let remainingBudget = Infinity;
     if (trade.side === 'BUY' && maxPosValue > 0) {
-      const totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
-      // Also count pending orders in the queue for this same asset (not yet executed)
+      // Check real position from Polymarket API (source of truth)
+      let totalSpent = 0;
+      try {
+        const funder = this.config.funderAddress;
+        if (funder) {
+          const res = await fetch(`https://data-api.polymarket.com/positions?user=${funder.toLowerCase()}&asset=${trade.asset}&limit=1`);
+          if (res.ok) {
+            const positions = await res.json();
+            if (Array.isArray(positions) && positions.length > 0) {
+              totalSpent = parseFloat(positions[0].totalBought || '0');
+            }
+          }
+        }
+      } catch {
+        // Fallback to local state if API fails
+        totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
+      }
+
+      // Also count pending orders in the queue (not yet executed)
       const pendingForAsset = this.orderQueue.getPendingAmount(trade.asset);
       const effectiveSpent = totalSpent + pendingForAsset;
       remainingBudget = maxPosValue - effectiveSpent;
       if (remainingBudget < this.config.minTradeSize) {
-        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - spent $${totalSpent.toFixed(2)} + $${pendingForAsset.toFixed(2)} pending (max: $${maxPosValue})`);
+        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - API says $${totalSpent.toFixed(2)} spent + $${pendingForAsset.toFixed(2)} pending (max: $${maxPosValue})`);
         return;
       }
     }
