@@ -4,7 +4,7 @@
   "userAccountSize": 1300,
   "maxPositionSize": 5,
   "addOnSize": 2,
-  "maxPositionValue": 35,
+  "maxPositionValue": 30,
   "minTradeSize": 0.2,
   "fixedTradePercent": 0,
   "minProbability": 0.05,
