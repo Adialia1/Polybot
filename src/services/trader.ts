@@ -190,16 +190,7 @@ export class Trader {
     console.log(`  Price: $${price.toFixed(4)}`);
     console.log(`  Size: ${size.toFixed(2)} shares`);
 
-    // Validate minimum share count (Polymarket CLOB requires >= 5 shares)
-    const MIN_SHARES = 5;
-    if (side === Side.BUY && size < MIN_SHARES) {
-      const minUsdNeeded = MIN_SHARES * price;
-      console.log(`[Trader] SKIPPED: ${size.toFixed(2)} shares < ${MIN_SHARES} share minimum (need $${minUsdNeeded.toFixed(2)} at this price)`);
-      return {
-        success: false,
-        error: `Below minimum share count: ${size.toFixed(2)} shares < ${MIN_SHARES} (need $${minUsdNeeded.toFixed(2)} at price $${price.toFixed(2)})`,
-      };
-    }
+    // Polymarket's actual minimum is ~$1 / ~1 share. Let the exchange reject if too small.
 
     if (this.config.dryRun) {
       console.log(`[Trader] DRY RUN - Would execute trade`);

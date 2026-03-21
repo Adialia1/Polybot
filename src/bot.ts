@@ -1109,9 +1109,9 @@ export class CopyTradingBot {
       return;
     }
 
-    // Skip if position too small for Polymarket minimum order size (5 shares)
-    if (shares < 5) {
-      console.log(`  TP skipped: ${shares.toFixed(2)} shares below Polymarket minimum (5)`);
+    // Skip if position too small for Polymarket minimum (~1 share)
+    if (shares < 1) {
+      console.log(`  TP skipped: ${shares.toFixed(2)} shares below minimum (1)`);
       return;
     }
 
