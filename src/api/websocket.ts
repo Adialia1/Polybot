@@ -109,12 +109,13 @@ export class MarketWebSocket extends EventEmitter {
         this.isConnecting = false;
         this.stopPingInterval();
 
-        // Only log unexpected closes (not normal idle timeout)
-        if (code !== 1000 && code !== 1001) {
+        // Only log unexpected closes (not normal idle timeout or server-initiated)
+        if (code !== 1000 && code !== 1001 && code !== 1005 && code !== 1006) {
           console.log(`[WS] Connection closed (code: ${code})`);
         }
 
-        if (this.shouldReconnect) {
+        // Only reconnect if we have active subscriptions (no point reconnecting with nothing to watch)
+        if (this.shouldReconnect && this.subscribedAssets.size > 0) {
           this.scheduleReconnect();
         }
       });

@@ -75,15 +75,24 @@ export class RiskManager {
     }
 
     // Check price difference from trader's entry
+    // Only reject UNFAVORABLE moves:
+    //   BUY: reject if price went UP (more expensive for us)
+    //   SELL: reject if price went DOWN (worse exit for us)
+    // Favorable moves (discounts) are allowed regardless of size
     try {
       const currentPrice = parseFloat(await this.clobApi.getPrice(tokenId, side));
       if (traderPrice > 0 && currentPrice > 0) {
-        const priceDiffPercent = Math.abs(currentPrice - traderPrice) / traderPrice * 100;
+        const priceDiff = currentPrice - traderPrice;
+        const priceDiffPercent = (priceDiff / traderPrice) * 100;
 
-        if (priceDiffPercent > this.config.maxPriceDiffPercent!) {
+        // For BUY: positive diff = price went up (bad), negative = discount (good)
+        // For SELL: negative diff = price went down (bad), positive = better exit (good)
+        const isUnfavorable = (side === 'BUY' && priceDiff > 0) || (side === 'SELL' && priceDiff < 0);
+
+        if (isUnfavorable && Math.abs(priceDiffPercent) > this.config.maxPriceDiffPercent!) {
           return {
             passed: false,
-            reason: `Price moved too far from trader (${priceDiffPercent.toFixed(1)}% diff > ${this.config.maxPriceDiffPercent}% max | trader: $${traderPrice.toFixed(3)}, current: $${currentPrice.toFixed(3)})`,
+            reason: `Price moved unfavorably (${priceDiffPercent.toFixed(1)}% | trader: $${traderPrice.toFixed(3)}, current: $${currentPrice.toFixed(3)})`,
           };
         }
       }
@@ -263,6 +272,12 @@ export class RiskManager {
         }
       } else {
         console.log(`  ❌ ${reason} failed: ${result.error}`);
+
+        // "not enough balance" on SELL = ghost position (we don't own these tokens)
+        if (result.error && (result.error.includes('not enough balance') || result.error.includes('not enough allowance'))) {
+          console.log(`  Removing ghost position (we don't own these tokens)`);
+          this.stateManager.updatePosition(position.asset, -position.size, currentPrice);
+        }
 
         // Send failure notification
         if (this.notifier) {

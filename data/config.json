@@ -26,13 +26,7 @@
       "address": "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
       "alias": "RN1",
       "enabled": true,
-      "allocation": 80
-    },
-    {
-      "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
-      "alias": "Trader2",
-      "enabled": true,
-      "allocation": 20
+      "allocation": 100
     }
   ]
 }

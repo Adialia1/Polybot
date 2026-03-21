@@ -3,7 +3,7 @@
 # Polybot Start Script
 # Keeps Mac awake and runs the bot
 
-cd /Users/adialia/polybot
+cd /Users/adialia/Desktop/Polybot
 
 # Kill any existing bot process
 pkill -f "tsx src/bot.ts" 2>/dev/null

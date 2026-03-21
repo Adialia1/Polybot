@@ -772,14 +772,37 @@ export class CopyTradingBot {
 
       // Apply per-trader allocation
       const allocation = wallet.allocation ?? 100; // Default to 100% if not specified
-      const allocatedSize = sizing.cappedSize * (allocation / 100);
+      let allocatedSize = sizing.cappedSize * (allocation / 100);
       console.log(`  Allocation: ${allocation}% -> $${allocatedSize.toFixed(2)}`);
 
-      // Check if allocated size is below minimum trade size
+      // Check if allocated size is below minimum trade size - bump up if within limits
       if (allocatedSize < this.config.minTradeSize) {
-        console.log(`\n⏭️  Skipping trade (allocated size $${allocatedSize.toFixed(2)} below minimum $${this.config.minTradeSize})`);
-        console.log('='.repeat(50) + '\n');
-        return;
+        if (allocatedSize >= 0.5) {
+          // Close enough to minimum - bump up
+          allocatedSize = this.config.minTradeSize;
+          console.log(`  Bumped to minimum: $${allocatedSize.toFixed(2)}`);
+        } else {
+          console.log(`\n⏭️  Skipping trade (allocated size $${allocatedSize.toFixed(2)} below minimum $${this.config.minTradeSize})`);
+          console.log('='.repeat(50) + '\n');
+          return;
+        }
+      }
+
+      // Validate against Polymarket's 5-share minimum for BUY orders
+      if (trade.side === 'BUY') {
+        const MIN_SHARES = 5;
+        const estimatedShares = allocatedSize / tradePrice;
+        if (estimatedShares < MIN_SHARES) {
+          const minUsdNeeded = Math.ceil(MIN_SHARES * tradePrice * 100) / 100;
+          if (minUsdNeeded <= this.config.maxPositionSize) {
+            allocatedSize = minUsdNeeded;
+            console.log(`  Bumped to $${allocatedSize.toFixed(2)} for ${MIN_SHARES}-share minimum`);
+          } else {
+            console.log(`\n⏭️  Skipping trade (need $${minUsdNeeded.toFixed(2)} for ${MIN_SHARES}-share min, exceeds max $${this.config.maxPositionSize})`);
+            console.log('='.repeat(50) + '\n');
+            return;
+          }
+        }
       }
 
       finalSize = allocatedSize;
@@ -803,13 +826,24 @@ export class CopyTradingBot {
       }
     }
 
-    // Add current market price
+    // Check market liquidity before trading
     try {
       const spread = await this.clobApi.getSpread(trade.asset);
+      const bidPrice = parseFloat(spread.bid);
+      const askPrice = parseFloat(spread.ask);
+      const spreadValue = parseFloat(spread.spread);
       console.log(`\n💹 Current Market:`);
       console.log(`  Bid: $${spread.bid} | Ask: $${spread.ask} | Spread: $${spread.spread}`);
+
+      // Skip if order book has no real liquidity (spread > 50% or bid is dust)
+      if (trade.side === 'BUY' && (spreadValue > 0.50 || bidPrice <= 0.01)) {
+        console.log(`\n⏭️  Skipping trade - no liquidity (spread: $${spread.spread})`);
+        console.log('='.repeat(50) + '\n');
+        return;
+      }
     } catch (err) {
-      // Ignore
+      // If we can't check liquidity, proceed anyway
+      console.log(`\n💹 Could not check market liquidity`);
     }
 
     // Queue the order
@@ -868,6 +902,11 @@ export class CopyTradingBot {
       // Cancel SL/TP protection orders before selling (so they don't conflict)
       if (order.trade.side === 'SELL') {
         await this.cancelProtectionOrders(order.trade.asset);
+        // Refresh balance allowance for conditional tokens before selling.
+        // The CLOB server caches balances, so we must update it with the specific
+        // token_id to ensure the sell order doesn't get rejected with "not enough balance".
+        await this.trader.updateBalanceAllowance(order.trade.asset);
+        await this.delay(1000); // Allow allowance to propagate
       }
 
       const result = await this.trader.copyTrade(order.trade, order.amount);
@@ -1012,12 +1051,16 @@ export class CopyTradingBot {
   }
 
   /**
-   * Handle order failure with retry logic using exponential backoff
+   * Handle order failure with retry logic using exponential backoff.
+   * Non-retryable errors (invalid amount, min size, bad signature) skip retries entirely.
    */
   private async handleOrderFailure(order: QueuedOrder, errorMessage: string): Promise<void> {
     const currentRetryCount = order.retryCount || 0;
 
-    if (currentRetryCount < this.config.maxRetries) {
+    // Check if this error is permanent (won't be fixed by retrying)
+    const isNonRetryable = Trader.isNonRetryableError(errorMessage);
+
+    if (!isNonRetryable && currentRetryCount < this.config.maxRetries) {
       // Calculate exponential backoff delay: baseDelay * attemptNumber
       const retryDelay = this.config.retryDelayMs * (currentRetryCount + 1);
 
@@ -1033,28 +1076,38 @@ export class CopyTradingBot {
       // Retry the order
       await this.executeOrder(order);
     } else {
-      // Max retries exceeded - mark as permanently failed
-      errorLogger.log('Bot.orderFailed', `${errorMessage} (after ${currentRetryCount} retries)`, {
+      // Non-retryable error or max retries exceeded - mark as permanently failed
+      const failReason = isNonRetryable
+        ? `${errorMessage} (non-retryable)`
+        : `${errorMessage} (after ${currentRetryCount} retries)`;
+
+      errorLogger.log('Bot.orderFailed', failReason, {
         side: order.trade.side,
         asset: order.trade.asset?.slice(0, 30),
         title: order.trade.title?.slice(0, 40),
         amount: order.amount,
       });
-      console.log(`\n❌ Trade failed after ${currentRetryCount} retries: ${errorMessage}`);
+
+      if (isNonRetryable) {
+        console.log(`\n❌ Trade failed (non-retryable): ${errorMessage}`);
+      } else {
+        console.log(`\n❌ Trade failed after ${currentRetryCount} retries: ${errorMessage}`);
+      }
+
       this.stateManager.recordTrade(false, 0);
       this.stateManager.updateOrder(order.id, {
         status: 'failed',
         processedAt: Date.now(),
       });
-      this.orderQueue.failOrder(order.id, `${errorMessage} (after ${currentRetryCount} retries)`);
+      this.orderQueue.failOrder(order.id, failReason);
 
-      // Send Telegram notification for failed trade (only after all retries exhausted)
+      // Send Telegram notification for failed trade
       await this.notifier.notifyTradeFailed({
         side: order.trade.side as 'BUY' | 'SELL',
         title: order.trade.title,
         outcome: order.trade.outcome,
         amount: order.amount,
-        error: `${errorMessage} (after ${currentRetryCount} retries)`,
+        error: failReason,
         walletAlias: order.walletAlias,
       });
     }
@@ -1096,11 +1149,14 @@ export class CopyTradingBot {
     let tpOrderId: string | undefined;
 
     // Update balance allowance for this specific token (required for GTC sell orders)
-    // Retry with delay — the exchange needs time to register the allowance after a buy
-    for (let attempt = 0; attempt < 3; attempt++) {
+    // The exchange needs time to settle the BUY and register conditional tokens.
+    // "delayed" orders can take 5-15 seconds to settle on-chain.
+    // If this initial attempt fails, the PositionWatchdog (runs every 10s) will retry.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // Wait longer before first attempt to give the BUY time to settle
+      await this.delay(attempt === 0 ? 8000 : 5000);
       await this.trader.updateBalanceAllowance(asset);
-      // Wait for allowance to propagate (longer on first attempt after buy)
-      await this.delay(attempt === 0 ? 2000 : 1000);
+      await this.delay(2000); // Let allowance propagate
 
       try {
         const tpResult = await this.trader.placeLimitOrder(asset, 'SELL', shares, takeProfitPrice);
@@ -1109,7 +1165,7 @@ export class CopyTradingBot {
           console.log(`  ✅ Take Profit order placed: ${tpOrderId}`);
           break;
         } else if (tpResult.error?.includes('not enough balance')) {
-          console.log(`  ⚠️ TP attempt ${attempt + 1}/3: allowance not ready yet, retrying...`);
+          console.log(`  ⚠️ TP attempt ${attempt + 1}/2: allowance not ready, watchdog will retry`);
           continue;
         } else {
           console.log(`  ⚠️ Take Profit order failed: ${tpResult.error}`);

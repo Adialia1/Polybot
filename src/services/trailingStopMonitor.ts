@@ -88,16 +88,20 @@ export class TrailingStopMonitor extends EventEmitter {
    */
   private async startWebSocket(): Promise<void> {
     try {
+      // Don't connect WebSocket if there are no positions to watch
+      const positions = this.stateManager.getAllPositions();
+      if (positions.length === 0) {
+        console.log(`[TrailingStop] No positions to watch, skipping WebSocket`);
+        return;
+      }
+
       this.ws = new MarketWebSocket();
       await this.ws.connect();
 
       // Subscribe to price updates for current positions
-      const positions = this.stateManager.getAllPositions();
-      if (positions.length > 0) {
-        const assetIds = positions.map(p => p.asset);
-        this.ws.subscribeToAssets(assetIds);
-        console.log(`[TrailingStop] WebSocket subscribed to ${assetIds.length} position prices`);
-      }
+      const assetIds = positions.map(p => p.asset);
+      this.ws.subscribeToAssets(assetIds);
+      console.log(`[TrailingStop] WebSocket subscribed to ${assetIds.length} position prices`);
 
       // Listen for price changes
       this.ws.on('last_trade_price', (event: any) => {
@@ -358,6 +362,13 @@ export class TrailingStopMonitor extends EventEmitter {
         }
       } else {
         console.log(`  Trailing stop failed: ${result.error}`);
+
+        // "not enough balance" on SELL = we don't own these tokens (ghost position)
+        // Remove from state to prevent endless retry loops
+        if (result.error && (result.error.includes('not enough balance') || result.error.includes('not enough allowance'))) {
+          console.log(`  Removing ghost position (we don't own these tokens)`);
+          this.stateManager.updatePosition(position.asset, -position.size, currentPrice);
+        }
 
         // Send failure notification
         if (this.notifier) {

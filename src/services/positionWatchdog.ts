@@ -147,18 +147,24 @@ export class PositionWatchdog {
       // Clear stale ID and re-place
       this.stateManager.clearProtectionOrders(pos.asset);
 
-      const replaced = await this.replaceTPOrder(pos);
-      if (replaced) {
+      const result = await this.replaceTPOrder(pos);
+      if (result === 'success') {
         return { asset: pos.asset, title: label, status: 'tp_replaced', detail: 'TP order missing from exchange, replaced' };
+      }
+      if (result === 'ghost') {
+        return { asset: pos.asset, title: label, status: 'healthy', detail: 'Ghost position removed' };
       }
       return { asset: pos.asset, title: label, status: 'tp_missing', detail: 'TP order missing, failed to replace' };
     }
 
     if (!takeProfitOrderId) {
       // No TP order ID saved at all — place one
-      const replaced = await this.replaceTPOrder(pos);
-      if (replaced) {
+      const result = await this.replaceTPOrder(pos);
+      if (result === 'success') {
         return { asset: pos.asset, title: label, status: 'tp_replaced', detail: 'No TP order found, placed new one' };
+      }
+      if (result === 'ghost') {
+        return { asset: pos.asset, title: label, status: 'healthy', detail: 'Ghost position removed' };
       }
       return { asset: pos.asset, title: label, status: 'tp_missing', detail: 'No TP order, failed to place' };
     }
@@ -187,18 +193,19 @@ export class PositionWatchdog {
 
   private async replaceTPOrder(
     pos: { asset: string; size: number; avgPrice: number; title: string }
-  ): Promise<boolean> {
+  ): Promise<'success' | 'failed' | 'ghost'> {
     try {
       const tpPercent = this.config.takeProfitPercent / 100;
       const takeProfitPrice = Math.min(0.99, Math.round((pos.avgPrice * (1 + tpPercent)) * 100) / 100);
 
       // Skip if TP price is not above entry
-      if (takeProfitPrice <= pos.avgPrice) return false;
+      if (takeProfitPrice <= pos.avgPrice) return 'failed';
 
       // Skip if position too small for Polymarket minimum (5 shares)
-      if (pos.size < 5) return false;
+      if (pos.size < 5) return 'failed';
 
       // Update balance allowance and retry with delay (exchange needs time to propagate)
+      let balanceError = false;
       for (let attempt = 0; attempt < 2; attempt++) {
         await this.trader.updateBalanceAllowance(pos.asset);
         await new Promise(r => setTimeout(r, 2000));
@@ -206,15 +213,27 @@ export class PositionWatchdog {
         const result = await this.trader.placeLimitOrder(pos.asset, 'SELL', pos.size, takeProfitPrice);
         if (result.success && result.orderId) {
           this.stateManager.setProtectionOrders(pos.asset, undefined, result.orderId);
-          return true;
+          return 'success';
         }
-        if (!result.error?.includes('not enough balance')) break; // Non-allowance error, stop
+        if (result.error?.includes('not enough balance') || result.error?.includes('not enough allowance')) {
+          balanceError = true;
+          continue; // Try one more time after allowance update
+        }
+        break; // Non-allowance error, stop
       }
-      return false;
+
+      // If both attempts failed with "not enough balance" → ghost position
+      if (balanceError) {
+        console.log(`[Watchdog] Ghost position detected: ${pos.title?.slice(0, 40)} — removing from state`);
+        this.stateManager.updatePosition(pos.asset, -pos.size, pos.avgPrice);
+        return 'ghost';
+      }
+
+      return 'failed';
     } catch (err: any) {
       errorLogger.logError('Watchdog.replaceTP', err, { asset: pos.asset.slice(0, 30), title: pos.title?.slice(0, 30) });
       console.error(`[Watchdog] Failed to replace TP for ${pos.title?.slice(0, 30)}: ${err?.message}`);
-      return false;
+      return 'failed';
     }
   }
 }
