@@ -721,14 +721,17 @@ export class CopyTradingBot {
     }
 
     // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
-    // Uses totalCost (actual USD spent) instead of size*avgPrice which drifts after syncs
+    // Uses totalCost + pending queue orders to prevent overshoot from concurrent signals
     const maxPosValue = (this.config as any).maxPositionValue || 0;
-    let remainingBudget = Infinity; // How much more we can spend on this market
+    let remainingBudget = Infinity;
     if (trade.side === 'BUY' && maxPosValue > 0) {
       const totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
-      remainingBudget = maxPosValue - totalSpent;
+      // Also count pending orders in the queue for this same asset (not yet executed)
+      const pendingForAsset = this.orderQueue.getPendingAmount(trade.asset);
+      const effectiveSpent = totalSpent + pendingForAsset;
+      remainingBudget = maxPosValue - effectiveSpent;
       if (remainingBudget < this.config.minTradeSize) {
-        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - already spent $${totalSpent.toFixed(2)} (max: $${maxPosValue})`);
+        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - spent $${totalSpent.toFixed(2)} + $${pendingForAsset.toFixed(2)} pending (max: $${maxPosValue})`);
         return;
       }
     }

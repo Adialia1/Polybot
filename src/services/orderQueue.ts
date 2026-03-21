@@ -86,6 +86,13 @@ export class OrderQueue extends EventEmitter {
     return order;
   }
 
+  // Get total pending amount for a specific asset (for position cap check)
+  getPendingAmount(asset: string): number {
+    return this.queue
+      .filter(o => (o.status === 'pending' || o.status === 'processing') && o.trade.asset === asset && o.trade.side === 'BUY')
+      .reduce((sum, o) => sum + o.amount, 0);
+  }
+
   // Skip an order (e.g., we don't have the position to sell)
   skipOrder(orderId: string, reason: string): void {
     const order = this.queue.find(o => o.id === orderId);
