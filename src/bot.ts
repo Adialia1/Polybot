@@ -1266,12 +1266,18 @@ export class CopyTradingBot {
   }
 
   /**
-   * Auto-sell positions at >= 98c to free up capital for new trades.
-   * Resolved/near-resolved markets are dead money — sell them fast.
+   * Auto-sell resolved/near-resolved positions to free up capital.
+   * 
+   * Safety rules:
+   * 1. ONLY sells — never buys anything
+   * 2. ONLY sells when actual order book BID >= $0.95 (never at $0.01)
+   * 3. Checks Polymarket data API for position status (redeemable, current price)
+   * 4. Removes losing positions from state (worth $0, no point selling)
+   * 5. Logs positions that need manual redemption on polymarket.com
    */
   private startResolvedPositionSeller(): void {
     const intervalMs = 120_000; // Every 2 minutes
-    console.log(`[AutoSell] Started — will sell positions at >= $0.98 every ${intervalMs / 1000}s`);
+    console.log(`[AutoSell] Started — checks every ${intervalMs / 1000}s (only sells when bid >= $0.95)`);
 
     this.resolvedSellInterval = setInterval(() => this.sellResolvedPositions(), intervalMs);
     // First check after 30s
@@ -1284,16 +1290,57 @@ export class CopyTradingBot {
     const positions = this.stateManager.getAllPositions().filter(p => p.size > 0.5);
     if (positions.length === 0) return;
 
+    // Check data API for real position status (includes current price + redeemable flag)
+    let apiPositions: any[] = [];
+    try {
+      const funder = this.config.funderAddress;
+      if (funder) {
+        const res = await fetch(`https://data-api.polymarket.com/positions?user=${funder.toLowerCase()}`);
+        if (res.ok) apiPositions = await res.json();
+      }
+    } catch { /* fallback to CLOB spread check */ }
+
     for (const pos of positions) {
       try {
+        const label = pos.title?.slice(0, 40) || pos.asset.slice(0, 20);
+
+        // Check data API first for this position
+        const apiPos = apiPositions.find((p: any) => p.asset === pos.asset);
+
+        // Case 1: Data API says position is redeemable (market resolved, we won)
+        if (apiPos?.redeemable) {
+          // Try to sell on CLOB if there's a good bid
+          const spread = await this.clobApi.getSpread(pos.asset);
+          const bid = parseFloat(spread.bid || '0');
+
+          if (bid >= 0.95) {
+            console.log(`[AutoSell] ${label} RESOLVED+WINNING bid=$${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares`);
+            await this.forceSellPosition(pos.asset);
+          } else {
+            // No CLOB liquidity — user needs to redeem manually on polymarket.com
+            console.log(`[AutoSell] ${label} RESOLVED but no CLOB bids (bid=$${bid.toFixed(2)}) — redeem manually on polymarket.com`);
+          }
+          continue;
+        }
+
+        // Case 2: Data API says current price is near zero (we lost)
+        const apiPrice = parseFloat(apiPos?.curPrice || '0');
+        if (apiPos && apiPrice <= 0.02 && pos.avgPrice > 0.05) {
+          console.log(`[AutoSell] ${label} LOST (price $${apiPrice.toFixed(3)}, entry $${pos.avgPrice.toFixed(3)}) — removing dead position`);
+          this.stateManager.updatePosition(pos.asset, -pos.size, apiPrice);
+          const realizedLoss = (apiPrice - pos.avgPrice) * pos.size;
+          this.stateManager.updateDailyPnL(realizedLoss);
+          continue;
+        }
+
+        // Case 3: Fallback — check CLOB bid directly (no data API info)
         const spread = await this.clobApi.getSpread(pos.asset);
         const bid = parseFloat(spread.bid || '0');
 
-        // ONLY sell when the actual BID is >= $0.95
-        // This is the real price we get. Never trust API/mid price alone —
-        // empty order books return bid=$0.01 which would sell for nothing.
+        // SAFETY: ONLY sell when actual BID >= $0.95
+        // This is the real price someone will pay. Empty books show $0.01.
         if (bid >= 0.95) {
-          console.log(`[AutoSell] ${pos.title?.slice(0, 40)} bid=$${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares`);
+          console.log(`[AutoSell] ${label} bid=$${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares`);
           await this.forceSellPosition(pos.asset);
         }
       } catch {

@@ -84,6 +84,15 @@ export class ClobApiClient {
     return { bid: bestBid, ask: bestAsk, spread };
   }
 
+  /**
+   * Get market info including resolution status.
+   * Returns { closed, tokens: [{ token_id, outcome, winner }], neg_risk }
+   */
+  async getMarket(conditionId: string): Promise<any> {
+    const response = await this.client.get(`/markets/${conditionId}`);
+    return response.data;
+  }
+
   clearCache(): void {
     this.priceCache.clear();
   }
