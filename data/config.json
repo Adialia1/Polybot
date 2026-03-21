@@ -4,7 +4,7 @@
   "userAccountSize": 1300,
   "maxPositionSize": 10,
   "minTradeSize": 1,
-  "fixedTradePercent": 10,
+  "fixedTradePercent": 0,
   "minProbability": 0.05,
   "maxProbability": 0.95,
   "trailingStopPercent": 0,

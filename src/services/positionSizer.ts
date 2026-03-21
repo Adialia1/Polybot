@@ -136,10 +136,17 @@ export class PositionSizer {
       // Fixed percentage mode - ignore trader's account size
       recommendedSize = (this.fixedTradePercent / 100) * this.userAccountSize;
       reason = `fixed ${this.fixedTradePercent}% per trade`;
+    } else if (traderProfile.totalValue > 0) {
+      // Sqrt scaling — uses trader's bet size as conviction signal.
+      // Big trader bets = high conviction = bigger copy. Small bets = small copy.
+      // sqrt() compresses the massive account size difference into a usable range.
+      const scaleFactor = Math.sqrt(this.userAccountSize / traderProfile.totalValue);
+      recommendedSize = originalTradeValue * scaleFactor;
+      reason = `sqrt-scaled ($${originalTradeValue.toFixed(0)} × ${scaleFactor.toFixed(4)})`;
     } else {
-      // Proportional mode - scale based on trader's trade percentage
-      recommendedSize = (tradePercentage / 100) * this.userAccountSize;
-      reason = 'proportional';
+      // Fallback if trader profile unavailable
+      recommendedSize = this.minTradeSize;
+      reason = 'fallback (no trader profile)';
     }
 
     // Apply caps and floors
