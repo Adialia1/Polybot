@@ -755,6 +755,15 @@ export class CopyTradingBot {
     console.log(`Size: ${trade.size} shares`);
     console.log(`Price: $${trade.price} (${(tradePrice * 100).toFixed(1)}% probability)`);
 
+    // Filter out small hedge legs — only copy conviction trades
+    const minTraderTradeUsd = parseFloat(process.env.MIN_TRADER_TRADE_USD || '0');
+    const traderTradeValue = parseFloat(String(trade.size)) * tradePrice;
+    if (minTraderTradeUsd > 0 && traderTradeValue < minTraderTradeUsd) {
+      console.log(`\n⏭️  Skipping (trader bet $${traderTradeValue.toFixed(2)} < $${minTraderTradeUsd} min)`);
+      console.log('='.repeat(50) + '\n');
+      return;
+    }
+
     // Calculate position size
     let finalSize = 0;
     try {
