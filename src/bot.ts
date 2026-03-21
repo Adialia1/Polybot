@@ -723,9 +723,11 @@ export class CopyTradingBot {
     // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
     // Uses totalCost (actual USD spent) instead of size*avgPrice which drifts after syncs
     const maxPosValue = (this.config as any).maxPositionValue || 0;
+    let remainingBudget = Infinity; // How much more we can spend on this market
     if (trade.side === 'BUY' && maxPosValue > 0) {
       const totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
-      if (totalSpent >= maxPosValue) {
+      remainingBudget = maxPosValue - totalSpent;
+      if (remainingBudget < this.config.minTradeSize) {
         console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - already spent $${totalSpent.toFixed(2)} (max: $${maxPosValue})`);
         return;
       }
@@ -826,8 +828,16 @@ export class CopyTradingBot {
         }
       }
 
-      // Polymarket's actual minimum is ~$1 or ~1 share.
-      // Let the exchange reject if truly too small — don't over-filter here.
+      // Cap at remaining position budget (don't overshoot maxPositionValue)
+      if (allocatedSize > remainingBudget) {
+        console.log(`  Budget cap: $${allocatedSize.toFixed(2)} -> $${remainingBudget.toFixed(2)} (only $${remainingBudget.toFixed(2)} left before $${maxPosValue} cap)`);
+        allocatedSize = remainingBudget;
+        if (allocatedSize < this.config.minTradeSize) {
+          console.log(`\n⏭️  Skipping trade (remaining budget $${allocatedSize.toFixed(2)} below minimum $${this.config.minTradeSize})`);
+          console.log('='.repeat(50) + '\n');
+          return;
+        }
+      }
 
       finalSize = allocatedSize;
     } catch (err: any) {
