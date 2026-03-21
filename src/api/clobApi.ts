@@ -33,6 +33,22 @@ export class ClobApiClient {
     return response.data;
   }
 
+  /**
+   * Safe version — returns null instead of throwing on 404 / "No orderbook exists".
+   */
+  async getOrderBookSafe(tokenId: string): Promise<OrderBook | null> {
+    try {
+      return await this.getOrderBook(tokenId);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const msg = error?.response?.data?.error || error?.message || '';
+      if (status === 404 || msg.includes('No orderbook exists')) {
+        return null;
+      }
+      throw error; // re-throw unexpected errors
+    }
+  }
+
   async getPrice(tokenId: string, side: 'BUY' | 'SELL'): Promise<string> {
     const cacheKey = `${tokenId}-${side}`;
     const cached = this.priceCache.get(cacheKey);
@@ -79,6 +95,22 @@ export class ClobApiClient {
     const bestBid = book.bids.length > 0 ? book.bids[0].price : '0';
     const bestAsk = book.asks.length > 0 ? book.asks[0].price : '1';
 
+    const spread = (parseFloat(bestAsk) - parseFloat(bestBid)).toFixed(4);
+
+    return { bid: bestBid, ask: bestAsk, spread };
+  }
+
+  /**
+   * Safe version — returns { bid: '0', ask: '1', spread: '1.0000' } on 404 / missing orderbook.
+   */
+  async getSpreadSafe(tokenId: string): Promise<{ bid: string; ask: string; spread: string }> {
+    const book = await this.getOrderBookSafe(tokenId);
+    if (!book) {
+      return { bid: '0', ask: '1', spread: '1.0000' };
+    }
+
+    const bestBid = book.bids.length > 0 ? book.bids[0].price : '0';
+    const bestAsk = book.asks.length > 0 ? book.asks[0].price : '1';
     const spread = (parseFloat(bestAsk) - parseFloat(bestBid)).toFixed(4);
 
     return { bid: bestBid, ask: bestAsk, spread };

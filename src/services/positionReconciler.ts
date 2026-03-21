@@ -148,8 +148,12 @@ export class PositionReconciler {
       this.stateManager.clearProtectionOrders(position.asset);
     }
 
-    // Get current best bid price
-    const book = await this.clobApi.getOrderBook(position.asset);
+    // Get current best bid price (safe: returns null if market resolved / orderbook gone)
+    const book = await this.clobApi.getOrderBookSafe(position.asset);
+    if (!book) {
+      console.log(`[Reconciler] No orderbook for ${position.title || position.asset.slice(0, 20)} — market likely resolved, skipping sell`);
+      return;
+    }
     const bestBid = parseFloat(book.bids?.[0]?.price || '0.5');
     const sellPrice = Math.max(0.01, bestBid);
 
