@@ -1286,11 +1286,24 @@ export class CopyTradingBot {
 
     for (const pos of positions) {
       try {
+        // Check both bid price and mid price — resolved markets may have empty order books
         const spread = await this.clobApi.getSpread(pos.asset);
         const bid = parseFloat(spread.bid || '0');
+        const ask = parseFloat(spread.ask || '1');
+        const mid = bid > 0 && ask < 1 ? (bid + ask) / 2 : 0;
 
-        if (bid >= 0.98) {
-          console.log(`[AutoSell] ${pos.title?.slice(0, 40)} at $${bid.toFixed(2)} — selling ${pos.size.toFixed(1)} shares to free capital`);
+        // Also try the /price endpoint for a more reliable price
+        let apiPrice = 0;
+        try {
+          const priceStr = await this.clobApi.getPrice(pos.asset, 'SELL');
+          apiPrice = parseFloat(priceStr || '0');
+        } catch { /* ignore */ }
+
+        const bestPrice = Math.max(bid, mid, apiPrice);
+
+        if (bestPrice >= 0.98) {
+          const sellPrice = Math.max(bid, 0.95); // Sell at bid or 95c minimum
+          console.log(`[AutoSell] ${pos.title?.slice(0, 40)} at $${bestPrice.toFixed(2)} (bid=$${bid.toFixed(2)}, mid=$${mid.toFixed(2)}, api=$${apiPrice.toFixed(2)}) — selling ${pos.size.toFixed(1)} shares`);
           await this.forceSellPosition(pos.asset);
         }
       } catch {
