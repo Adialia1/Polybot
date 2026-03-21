@@ -789,6 +789,15 @@ export class CopyTradingBot {
         return;
       }
 
+      // If we already hold this asset, cap at addOnSize (smaller add-on instead of full entry)
+      const addOnSize = (this.config as any).addOnSize || 0;
+      if (addOnSize > 0 && trade.side === 'BUY' && this.stateManager.hasPosition(trade.asset)) {
+        if (sizing.cappedSize > addOnSize) {
+          sizing.cappedSize = addOnSize;
+          console.log(`  Add-on: already holding → capped at $${addOnSize}`);
+        }
+      }
+
       // Apply per-trader allocation
       const allocation = wallet.allocation ?? 100; // Default to 100% if not specified
       let allocatedSize = sizing.cappedSize * (allocation / 100);
