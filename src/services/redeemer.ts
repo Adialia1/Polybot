@@ -2,6 +2,7 @@ import { createWalletClient, createPublicClient, http, encodeFunctionData, parse
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygon } from 'viem/chains';
 import { DataApiClient } from '../api/dataApi.js';
+import { ClobApiClient } from '../api/clobApi.js';
 import { StateManager } from './stateManager.js';
 import { errorLogger } from './errorLogger.js';
 
@@ -88,7 +89,6 @@ export interface RedeemResult {
   conditionId: string;
   success: boolean;
   txHash?: string;
-  usdcRedeemed?: number;
   error?: string;
 }
 
@@ -96,11 +96,13 @@ export interface RedeemerConfig {
   privateKey: string;
   funderAddress?: string;
   signatureType: number; // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
+  dryRun?: boolean;
   rpcUrl?: string;
 }
 
 export class Redeemer {
   private dataApi: DataApiClient;
+  private clobApi: ClobApiClient;
   private stateManager: StateManager;
   private config: RedeemerConfig;
   private publicClient;
@@ -112,6 +114,7 @@ export class Redeemer {
     this.config = config;
     this.stateManager = stateManager;
     this.dataApi = new DataApiClient();
+    this.clobApi = new ClobApiClient();
 
     const rpcUrl = config.rpcUrl || 'https://polygon.drpc.org';
     this.account = privateKeyToAccount(config.privateKey as `0x${string}`);
@@ -133,13 +136,16 @@ export class Redeemer {
 
   /**
    * Check all positions for redeemable ones and redeem them on-chain.
-   * Returns results for each attempted redemption.
    */
   async redeemAll(): Promise<RedeemResult[]> {
+    if (this.config.dryRun) {
+      console.log('[Redeemer] DRY RUN — skipping on-chain redemption');
+      return [];
+    }
+
     const results: RedeemResult[] = [];
 
     try {
-      // Fetch positions from Data API to check redeemable flag
       const apiPositions = await this.dataApi.getPositions(this.funderAddress, {
         limit: 200,
         sizeThreshold: 0.01,
@@ -148,7 +154,6 @@ export class Redeemer {
       const redeemable = apiPositions.filter(p => p.redeemable && parseFloat(p.size) > 0.001);
 
       if (redeemable.length === 0) {
-        console.log('[Redeemer] No redeemable positions found');
         return results;
       }
 
@@ -170,9 +175,11 @@ export class Redeemer {
         try {
           console.log(`[Redeemer] Redeeming: ${label}`);
 
-          // Determine if neg risk market by checking the CLOB client
-          // For simplicity, try standard redemption first, fall back to neg risk
-          const result = await this.redeemPosition(conditionId, positions);
+          // Determine market type (neg risk or standard) via CLOB API
+          const isNegRisk = await this.checkNegRisk(firstPos.asset);
+          const result = isNegRisk
+            ? await this.redeemNegRisk(conditionId, positions)
+            : await this.redeemStandard(conditionId, positions);
 
           if (result.success) {
             console.log(`[Redeemer] ✅ Redeemed: ${label} — tx: ${result.txHash?.slice(0, 16)}...`);
@@ -182,7 +189,6 @@ export class Redeemer {
               const localPos = this.stateManager.getPosition(pos.asset);
               if (localPos) {
                 this.stateManager.updatePosition(pos.asset, -localPos.size, 1.0);
-                // Record as profit (redeemed at $1 per share)
                 const pnl = (1.0 - localPos.avgPrice) * localPos.size;
                 this.stateManager.updateDailyPnL(pnl);
               }
@@ -192,8 +198,6 @@ export class Redeemer {
           }
 
           results.push(result);
-
-          // Small delay between redemptions
           await new Promise(r => setTimeout(r, 2000));
         } catch (err: any) {
           errorLogger.logError('Redeemer.redeemAll', err, { conditionId, title: label });
@@ -215,17 +219,35 @@ export class Redeemer {
   }
 
   /**
-   * Redeem a specific market's positions on-chain.
+   * Check if a token belongs to a neg risk market via CLOB API.
    */
-  private async redeemPosition(
+  private async checkNegRisk(tokenId: string): Promise<boolean> {
+    try {
+      // The ClobApiClient wraps the CLOB client which has getNegRisk
+      const url = `https://clob.polymarket.com/neg-risk?token_id=${tokenId}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        return data?.neg_risk === true;
+      }
+    } catch {
+      // If we can't determine, default to standard (safer — standard redeem
+      // on a neg-risk market will just revert without losing funds)
+    }
+    return false;
+  }
+
+  /**
+   * Redeem via standard ConditionalTokens contract.
+   * Uses eth_call simulation first to avoid wasting gas on revert.
+   */
+  private async redeemStandard(
     conditionId: string,
     positions: any[],
   ): Promise<RedeemResult> {
     const firstPos = positions[0];
     const title = firstPos.title || 'Unknown';
 
-    // Encode the redemption calldata
-    // Standard markets: CTF.redeemPositions(USDC, 0x0, conditionId, [1, 2])
     const redeemCalldata = encodeFunctionData({
       abi: CTF_REDEEM_ABI,
       functionName: 'redeemPositions',
@@ -237,58 +259,30 @@ export class Redeemer {
       ],
     });
 
+    // Simulate first to avoid wasting gas
+    const txTarget = this.getTxTarget(CTF_ADDRESS, redeemCalldata);
     try {
-      let txHash: string;
-
-      if (this.config.signatureType === 1) {
-        // POLY_PROXY: Call through ProxyWalletFactory
-        txHash = await this.executeViaProxyFactory(CTF_ADDRESS, redeemCalldata);
-      } else if (this.config.signatureType === 2) {
-        // GNOSIS_SAFE: Call through Safe execTransaction
-        txHash = await this.executeViaSafe(CTF_ADDRESS, redeemCalldata);
-      } else {
-        // EOA: Direct call
-        txHash = await this.executeDirect(CTF_ADDRESS, redeemCalldata);
-      }
-
-      // Wait for confirmation
-      const receipt = await this.publicClient.waitForTransactionReceipt({
-        hash: txHash as `0x${string}`,
-        timeout: 30000,
+      await this.publicClient.call({
+        account: this.account.address,
+        to: txTarget.to as `0x${string}`,
+        data: txTarget.data as `0x${string}`,
       });
-
-      if (receipt.status === 'success') {
-        return {
-          asset: firstPos.asset,
-          title,
-          conditionId,
-          success: true,
-          txHash,
-        };
-      } else {
-        // Standard redemption failed — try neg risk adapter
-        console.log(`[Redeemer] Standard redeem failed, trying NegRiskAdapter...`);
-        return await this.redeemNegRisk(conditionId, positions);
-      }
-    } catch (err: any) {
-      // If standard call reverted, try neg risk
-      if (err?.message?.includes('revert') || err?.message?.includes('execution reverted')) {
-        console.log(`[Redeemer] Standard redeem reverted, trying NegRiskAdapter...`);
-        return await this.redeemNegRisk(conditionId, positions);
-      }
-
+    } catch (simErr: any) {
       return {
         asset: firstPos.asset,
         title,
         conditionId,
         success: false,
-        error: err?.message || 'Transaction failed',
+        error: `Simulation failed: ${simErr?.message?.slice(0, 100)}`,
       };
     }
+
+    return await this.submitTx(CTF_ADDRESS, redeemCalldata, firstPos.asset, title, conditionId);
   }
 
   /**
    * Redeem via NegRiskAdapter for neg-risk markets.
+   * Builds a 2-element amounts array indexed by outcomeIndex.
    */
   private async redeemNegRisk(
     conditionId: string,
@@ -297,11 +291,14 @@ export class Redeemer {
     const firstPos = positions[0];
     const title = firstPos.title || 'Unknown';
 
-    // For neg risk: amounts array with token amounts (in 6 decimal USDC units)
-    const amounts = positions.map(p => {
-      const size = parseFloat(p.size);
-      return parseUnits(size.toFixed(6), 6);
-    });
+    // Build 2-element amounts array: [yesAmount, noAmount]
+    // outcomeIndex 0 = YES, outcomeIndex 1 = NO
+    const yesPos = positions.find((p: any) => p.outcomeIndex === 0);
+    const noPos = positions.find((p: any) => p.outcomeIndex === 1);
+    const amounts = [
+      yesPos ? parseUnits(parseFloat(yesPos.size).toFixed(6), 6) : BigInt(0),
+      noPos ? parseUnits(parseFloat(noPos.size).toFixed(6), 6) : BigInt(0),
+    ];
 
     const redeemCalldata = encodeFunctionData({
       abi: NEG_RISK_REDEEM_ABI,
@@ -312,15 +309,63 @@ export class Redeemer {
       ],
     });
 
+    // Simulate first
+    const txTarget = this.getTxTarget(NEG_RISK_ADAPTER, redeemCalldata);
+    try {
+      await this.publicClient.call({
+        account: this.account.address,
+        to: txTarget.to as `0x${string}`,
+        data: txTarget.data as `0x${string}`,
+      });
+    } catch (simErr: any) {
+      return {
+        asset: firstPos.asset,
+        title,
+        conditionId,
+        success: false,
+        error: `NegRisk simulation failed: ${simErr?.message?.slice(0, 100)}`,
+      };
+    }
+
+    return await this.submitTx(NEG_RISK_ADAPTER, redeemCalldata, firstPos.asset, title, conditionId);
+  }
+
+  /**
+   * Get the actual tx target (wraps calldata for proxy/safe if needed).
+   */
+  private getTxTarget(contractAddr: string, calldata: string): { to: string; data: string } {
+    if (this.config.signatureType === 1) {
+      // POLY_PROXY: wrap in ProxyWalletFactory.proxy()
+      const proxyData = encodeFunctionData({
+        abi: PROXY_WALLET_FACTORY_ABI,
+        functionName: 'proxy',
+        args: [[{ to: contractAddr as `0x${string}`, value: BigInt(0), data: calldata as `0x${string}` }]],
+      });
+      return { to: PROXY_WALLET_FACTORY, data: proxyData };
+    }
+    // EOA or Safe: direct call (Safe simulation may not work via eth_call)
+    return { to: contractAddr, data: calldata };
+  }
+
+  /**
+   * Submit the actual on-chain transaction.
+   */
+  private async submitTx(
+    contractAddr: string,
+    calldata: string,
+    asset: string,
+    title: string,
+    conditionId: string,
+  ): Promise<RedeemResult> {
     try {
       let txHash: string;
 
       if (this.config.signatureType === 1) {
-        txHash = await this.executeViaProxyFactory(NEG_RISK_ADAPTER, redeemCalldata);
+        txHash = await this.executeViaProxyFactory(contractAddr, calldata);
       } else if (this.config.signatureType === 2) {
-        txHash = await this.executeViaSafe(NEG_RISK_ADAPTER, redeemCalldata);
+        txHash = await this.executeViaSafe(contractAddr, calldata);
       } else {
-        txHash = await this.executeDirect(NEG_RISK_ADAPTER, redeemCalldata);
+        txHash = await this.executeDirect(contractAddr, calldata);
       }
 
       const receipt = await this.publicClient.waitForTransactionReceipt({
@@ -329,7 +374,7 @@ export class Redeemer {
       });
 
       return {
-        asset: firstPos.asset,
+        asset,
         title,
         conditionId,
         success: receipt.status === 'success',
@@ -338,11 +383,11 @@ export class Redeemer {
       };
     } catch (err: any) {
       return {
-        asset: firstPos.asset,
+        asset,
         title,
         conditionId,
         success: false,
-        error: err?.message || 'NegRisk redemption failed',
+        error: err?.message || 'Transaction failed',
       };
     }
   }
@@ -351,12 +396,11 @@ export class Redeemer {
    * Execute a contract call directly (EOA mode).
    */
   private async executeDirect(to: string, data: string): Promise<string> {
-    const txHash = await this.walletClient.sendTransaction({
+    return await this.walletClient.sendTransaction({
       to: to as `0x${string}`,
       data: data as `0x${string}`,
       value: BigInt(0),
     });
-    return txHash;
   }
 
   /**
@@ -369,46 +413,44 @@ export class Redeemer {
       args: [[{ to: to as `0x${string}`, value: BigInt(0), data: data as `0x${string}` }]],
     });
 
-    const txHash = await this.walletClient.sendTransaction({
+    return await this.walletClient.sendTransaction({
       to: PROXY_WALLET_FACTORY,
       data: proxyCalldata as `0x${string}`,
       value: BigInt(0),
     });
-    return txHash;
   }
 
   /**
    * Execute a contract call through a Gnosis Safe (GNOSIS_SAFE mode).
-   * Uses pre-validated signature (owner sends tx directly to Safe).
+   * Uses pre-validated signature: 32-byte padded address + 32 zero bytes + 0x01
    */
   private async executeViaSafe(to: string, data: string): Promise<string> {
-    // Pre-validated signature: owner address padded + signature type byte (01)
+    // Pre-validated signature (65 bytes): {32-byte padded address}{32 zero bytes}{01}
     const ownerPadded = this.account.address.toLowerCase().replace('0x', '').padStart(64, '0');
-    const preValidatedSig = `0x000000000000000000000000${ownerPadded}000000000000000000000000000000000000000000000000000000000000000001` as `0x${string}`;
+    const preValidatedSig = `0x${ownerPadded}${'0'.repeat(64)}01` as `0x${string}`;
 
     const execCalldata = encodeFunctionData({
       abi: SAFE_EXEC_ABI,
       functionName: 'execTransaction',
       args: [
         to as `0x${string}`,
-        BigInt(0),                                    // value
-        data as `0x${string}`,                        // data
+        BigInt(0),
+        data as `0x${string}`,
         0,                                            // operation (CALL)
-        BigInt(0),                                    // safeTxGas
-        BigInt(0),                                    // baseGas
-        BigInt(0),                                    // gasPrice
-        '0x0000000000000000000000000000000000000000',  // gasToken
-        '0x0000000000000000000000000000000000000000',  // refundReceiver
-        preValidatedSig,                              // signatures
+        BigInt(0),
+        BigInt(0),
+        BigInt(0),
+        '0x0000000000000000000000000000000000000000',
+        '0x0000000000000000000000000000000000000000',
+        preValidatedSig,
       ],
     });
 
-    const txHash = await this.walletClient.sendTransaction({
+    return await this.walletClient.sendTransaction({
       to: this.funderAddress as `0x${string}`,
       data: execCalldata,
       value: BigInt(0),
     });
-    return txHash;
   }
 
   /**
@@ -427,9 +469,8 @@ export class Redeemer {
 
       for (const pos of redeemable) {
         const size = parseFloat(pos.size);
-        const value = size; // Redeemable = $1 per share
-        totalValue += value;
-        positionLabels.push(`${pos.title?.slice(0, 35)} (${pos.outcome}) — ${size.toFixed(1)} shares ≈ $${value.toFixed(2)}`);
+        totalValue += size;
+        positionLabels.push(`${pos.title?.slice(0, 35)} (${pos.outcome}) — ${size.toFixed(1)} shares ≈ $${size.toFixed(2)}`);
       }
 
       return { count: redeemable.length, totalValue, positions: positionLabels };

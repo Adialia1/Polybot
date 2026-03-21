@@ -163,6 +163,7 @@ export class CopyTradingBot {
         privateKey: this.config.privateKey,
         funderAddress: this.config.funderAddress,
         signatureType: this.config.signatureType || 0,
+        dryRun: this.config.dryRun,
       }, this.stateManager);
       this.notifier.setRedeemer(this.redeemer);
 
