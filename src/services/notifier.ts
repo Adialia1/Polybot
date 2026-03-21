@@ -1,5 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { StateManager } from './stateManager.js';
+import type { Redeemer } from './redeemer.js';
 
 export interface TradeNotification {
   side: 'BUY' | 'SELL';
@@ -54,6 +55,7 @@ export class TelegramNotifier {
   private chatId: string | null = null;
   private enabled: boolean = false;
   private stateManager: StateManager | null = null;
+  private redeemer: Redeemer | null = null;
   private startTime: number = Date.now();
 
   constructor(stateManager?: StateManager) {
@@ -90,6 +92,13 @@ export class TelegramNotifier {
     } else {
       console.log('[Notifier] Telegram notifications disabled (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set)');
     }
+  }
+
+  /**
+   * Set the redeemer instance (called after bot initialization)
+   */
+  setRedeemer(redeemer: Redeemer): void {
+    this.redeemer = redeemer;
   }
 
   /**
@@ -161,6 +170,81 @@ export class TelegramNotifier {
       await this.sendMessage(message);
     });
 
+    // /redeem - Redeem all resolved winning positions
+    this.bot.onText(/\/redeem/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId) return;
+
+      if (!this.redeemer) {
+        await this.sendMessage('❌ Redeemer not initialized');
+        return;
+      }
+
+      await this.sendMessage('🔄 Checking for redeemable positions...');
+
+      try {
+        const summary = await this.redeemer.getRedeemableSummary();
+
+        if (summary.count === 0) {
+          await this.sendMessage('✅ No redeemable positions found');
+          return;
+        }
+
+        await this.sendMessage(`Found ${summary.count} redeemable position(s) worth ~$${summary.totalValue.toFixed(2)}. Redeeming...`);
+
+        const results = await this.redeemer.redeemAll();
+        const succeeded = results.filter(r => r.success);
+        const failed = results.filter(r => !r.success);
+
+        let resultMsg = `💰 <b>Redemption Complete</b>\n\n`;
+        resultMsg += `✅ Redeemed: ${succeeded.length}\n`;
+        if (failed.length > 0) resultMsg += `❌ Failed: ${failed.length}\n`;
+
+        for (const r of succeeded) {
+          resultMsg += `\n• ${r.title.slice(0, 35)}`;
+          if (r.txHash) resultMsg += ` — <a href="https://polygonscan.com/tx/${r.txHash}">tx</a>`;
+        }
+        for (const r of failed) {
+          resultMsg += `\n• ❌ ${r.title.slice(0, 35)} — ${r.error?.slice(0, 50)}`;
+        }
+
+        await this.sendMessage(resultMsg);
+      } catch (err: any) {
+        await this.sendMessage(`❌ Redeem error: ${err?.message?.slice(0, 100)}`);
+      }
+    });
+
+    // /balance - Show USDC balance and redeemable positions
+    this.bot.onText(/\/balance/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId) return;
+
+      let message = '💰 <b>Account Balance</b>\n\n';
+
+      if (this.redeemer) {
+        try {
+          const summary = await this.redeemer.getRedeemableSummary();
+          if (summary.count > 0) {
+            message += `🎯 <b>Redeemable: ${summary.count} position(s) ≈ $${summary.totalValue.toFixed(2)}</b>\n`;
+            for (const label of summary.positions.slice(0, 10)) {
+              message += `  • ${label}\n`;
+            }
+            message += `\nUse /redeem to claim them!\n`;
+          } else {
+            message += '✅ No pending redemptions\n';
+          }
+        } catch {
+          message += '⚠️ Could not check redeemable positions\n';
+        }
+      }
+
+      if (this.stateManager) {
+        const positions = this.stateManager.getAllPositions();
+        const totalValue = positions.reduce((sum, p) => sum + (p.size * p.avgPrice), 0);
+        message += `\n📊 Open positions: ${positions.length} (cost: $${totalValue.toFixed(2)})`;
+      }
+
+      await this.sendMessage(message);
+    });
+
     // /help - Show available commands
     this.bot.onText(/\/help/, async (msg) => {
       if (msg.chat.id.toString() !== this.chatId) return;
@@ -171,6 +255,8 @@ export class TelegramNotifier {
 /status - Check if bot is active
 /positions - Show open positions
 /stats - Show trading statistics
+/balance - Show balance & redeemable positions
+/redeem - Redeem all resolved winning positions
 /help - Show this help message
       `.trim();
 
@@ -193,6 +279,13 @@ export class TelegramNotifier {
    */
   isEnabled(): boolean {
     return this.enabled;
+  }
+
+  /**
+   * Send a custom notification message (public, for auto-redeem etc.)
+   */
+  async notifyCustom(text: string): Promise<void> {
+    await this.sendMessage(text);
   }
 
   /**

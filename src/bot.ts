@@ -18,6 +18,7 @@ import { getConfigLoader } from './services/configLoader.js';
 import { ClobApiClient } from './api/clobApi.js';
 import { loadConfig, updateConfig, getConfig } from './config.js';
 import { errorLogger } from './services/errorLogger.js';
+import { Redeemer } from './services/redeemer.js';
 import { TradeSignal, WalletConfig, Trade, RecentSignal, CopyConfig } from './types/index.js';
 
 // Conflict resolution timeout (5 minutes in milliseconds)
@@ -44,6 +45,8 @@ export class CopyTradingBot {
   private notifier: TelegramNotifier;
   private healthCheckServer: HealthCheckServer | null = null;
   private dashboardServer: DashboardServer | null = null;
+  private redeemer: Redeemer | null = null;
+  private autoRedeemInterval: NodeJS.Timeout | null = null;
   private isRunning = false;
   private isPaused = false;
   // Recent signals for conflict detection (in-memory, not persisted)
@@ -154,6 +157,14 @@ export class CopyTradingBot {
         console.error('Failed to initialize trader:', err);
         return;
       }
+
+      // Initialize redeemer for on-chain position redemption
+      this.redeemer = new Redeemer({
+        privateKey: this.config.privateKey,
+        funderAddress: this.config.funderAddress,
+        signatureType: this.config.signatureType || 0,
+      }, this.stateManager);
+      this.notifier.setRedeemer(this.redeemer);
 
       // Initialize reconciler
       this.reconciler = new PositionReconciler({
@@ -289,6 +300,9 @@ export class CopyTradingBot {
 
     // Start auto-sell for resolved positions (>= $0.98)
     this.startResolvedPositionSeller();
+
+    // Start auto-redeem for resolved positions (on-chain redemption)
+    this.startAutoRedeem();
 
     // Place TP orders for existing positions that don't have them yet
     await this.placeProtectionOrdersForExistingPositions();
@@ -935,6 +949,7 @@ export class CopyTradingBot {
             {
               title: order.trade.title,
               outcome: order.trade.outcome,
+              conditionId: order.trade.conditionId,
             }
           );
 
@@ -1280,6 +1295,47 @@ export class CopyTradingBot {
     setTimeout(() => this.sellResolvedPositions(), 30_000);
   }
 
+  /**
+   * Auto-redeem resolved winning positions on-chain.
+   * Runs every 3 minutes, offset from auto-sell to avoid conflicts.
+   */
+  private startAutoRedeem(): void {
+    if (!this.redeemer) return;
+
+    const intervalMs = 180_000; // Every 3 minutes
+    console.log(`[AutoRedeem] Started — checks every ${intervalMs / 1000}s`);
+
+    this.autoRedeemInterval = setInterval(async () => {
+      try {
+        const results = await this.redeemer!.redeemAll();
+        const succeeded = results.filter(r => r.success);
+        if (succeeded.length > 0) {
+          const totalLabels = succeeded.map(r => r.title.slice(0, 30)).join(', ');
+          console.log(`[AutoRedeem] Redeemed ${succeeded.length} position(s): ${totalLabels}`);
+
+          // Notify via Telegram
+          let msg = `💰 <b>Auto-Redeemed ${succeeded.length} position(s)</b>\n`;
+          for (const r of succeeded) {
+            msg += `\n• ${r.title.slice(0, 35)}`;
+            if (r.txHash) msg += ` — <a href="https://polygonscan.com/tx/${r.txHash}">tx</a>`;
+          }
+          await this.notifier.notifyCustom(msg);
+        }
+      } catch (err: any) {
+        errorLogger.logError('AutoRedeem', err);
+      }
+    }, intervalMs);
+
+    // First check after 60s (after auto-sell has had a chance to run first)
+    setTimeout(async () => {
+      try {
+        await this.redeemer!.redeemAll();
+      } catch (err: any) {
+        errorLogger.logError('AutoRedeem.initial', err);
+      }
+    }, 60_000);
+  }
+
   private async sellResolvedPositions(): Promise<void> {
     if (!this.trader || this.config.dryRun) return;
 
@@ -1602,6 +1658,10 @@ export class CopyTradingBot {
 
     if (this.reconcileInterval) {
       clearInterval(this.reconcileInterval);
+    }
+
+    if (this.autoRedeemInterval) {
+      clearInterval(this.autoRedeemInterval);
     }
 
     if (this.riskManager) {

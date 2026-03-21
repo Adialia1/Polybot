@@ -23,6 +23,7 @@ export interface BotState {
       slug: string;
       entryTime: number;
       walletAlias?: string; // Track which trader opened this position
+      conditionId?: string; // Market condition ID (needed for on-chain redemption)
       totalCost?: number; // Running total of actual USD spent on buys (reliable position cap)
       highestPrice?: number; // Highest price reached for trailing stop
       stopLossOrderId?: string; // GTC limit order ID for stop loss
@@ -205,7 +206,7 @@ export class StateManager {
     asset: string,
     sizeDelta: number,
     price: number,
-    metadata?: { title?: string; outcome?: string; slug?: string }
+    metadata?: { title?: string; outcome?: string; slug?: string; conditionId?: string }
   ): void {
     const existing = this.state.positions[asset];
 
@@ -233,6 +234,7 @@ export class StateManager {
         size: sizeDelta,
         avgPrice: price,
         totalCost: price * sizeDelta, // Track actual dollars spent from the start
+        conditionId: metadata?.conditionId,
         title: metadata?.title || 'Unknown',
         outcome: metadata?.outcome || 'Unknown',
         slug: metadata?.slug || '',

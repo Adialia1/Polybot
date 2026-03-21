@@ -2,7 +2,7 @@
   "dryRun": false,
   "enableTrading": true,
   "userAccountSize": 1300,
-  "maxPositionSize": 6,
+  "maxPositionSize": 5,
   "addOnSize": 2,
   "maxPositionValue": 35,
   "minTradeSize": 0.2,
