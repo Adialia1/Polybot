@@ -20,6 +20,7 @@ export const defaultConfig: CopyConfig = {
   pollingIntervalMs: 1000, // Poll every 1 second
   copyDelayMs: 100, // Delay before copying trade (keep low for speed)
   maxPositionSize: 10, // Max $10 per position (for $30 account)
+  maxPositionValue: 0, // Max total $ per market across all trades (0 = unlimited)
   minTradeSize: 1, // Minimum $1 trade size
   userAccountSize: 30, // Your account size in USD
   maxPercentagePerTrade: 20, // Max 20% of your account per trade ($6 max)

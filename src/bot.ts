@@ -721,8 +721,9 @@ export class CopyTradingBot {
     }
 
     // Per-position cap: use MAX of API + local state + pending queue (belt AND suspenders)
-    const maxPosValue = (this.config as any).maxPositionValue || 0;
+    const maxPosValue = this.config.maxPositionValue || 0;
     let remainingBudget = Infinity;
+    console.log(`  [CAP CHECK] maxPositionValue=${maxPosValue}, asset=${trade.asset.slice(0, 15)}...`);
     if (trade.side === 'BUY' && maxPosValue > 0) {
       // Layer 1: Local state (always available, updated on every execution)
       const localSpent = this.stateManager.getPositionTotalCost(trade.asset);
@@ -752,8 +753,10 @@ export class CopyTradingBot {
       const effectiveSpent = totalSpent + pendingForAsset;
       remainingBudget = maxPosValue - effectiveSpent;
 
+      console.log(`  [CAP CHECK] api=$${apiSpent.toFixed(2)} local=$${localSpent.toFixed(2)} pending=$${pendingForAsset.toFixed(2)} effective=$${effectiveSpent.toFixed(2)} remaining=$${remainingBudget.toFixed(2)}`);
+
       if (remainingBudget < this.config.minTradeSize) {
-        console.log(`[PositionCap] Skipped "${trade.title}" — api=$${apiSpent.toFixed(2)} local=$${localSpent.toFixed(2)} pending=$${pendingForAsset.toFixed(2)} total=$${effectiveSpent.toFixed(2)} (max $${maxPosValue})`);
+        console.log(`  ❌ [PositionCap] BLOCKED "${trade.title}" — $${effectiveSpent.toFixed(2)} spent (max $${maxPosValue})`);
         return;
       }
     }

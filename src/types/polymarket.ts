@@ -146,6 +146,8 @@ export interface CopyConfig {
   orderSlippagePercent?: number; // Slippage tolerance for market orders (default: 15)
   minTraderTradeUsd?: number; // Skip trader trades below $X (filters hedge legs, default: 0)
   signatureType?: number; // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
+  maxPositionValue?: number; // Max total $ spent per market (0 = unlimited)
+  addOnSize?: number; // Max $ per add-on trade to existing position
   telegramBotToken?: string; // Telegram bot token
   telegramChatId?: string; // Telegram chat ID
 }
