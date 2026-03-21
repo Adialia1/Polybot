@@ -138,8 +138,8 @@ export class PositionWatchdog {
     const { takeProfitOrderId } = this.stateManager.getProtectionOrders(pos.asset);
 
     // Positions too small for Polymarket minimum — can't place TP, treat as healthy
-    if (pos.size < 5) {
-      return { asset: pos.asset, title: label, status: 'healthy', detail: `Too small for TP (${pos.size.toFixed(1)} < 5 shares)` };
+    if (pos.size < 1) {
+      return { asset: pos.asset, title: label, status: 'healthy', detail: `Too small for TP (${pos.size.toFixed(1)} < 1 share)` };
     }
 
     if (takeProfitOrderId && !this.exchangeOrderIds.has(takeProfitOrderId)) {
@@ -201,8 +201,8 @@ export class PositionWatchdog {
       // Skip if TP price is not above entry
       if (takeProfitPrice <= pos.avgPrice) return 'failed';
 
-      // Skip if position too small for Polymarket minimum (5 shares)
-      if (pos.size < 5) return 'failed';
+      // Skip if position too small for Polymarket minimum (~1 share)
+      if (pos.size < 1) return 'failed';
 
       // Update balance allowance and retry with delay (exchange needs time to propagate)
       let balanceError = false;

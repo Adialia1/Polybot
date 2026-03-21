@@ -788,22 +788,8 @@ export class CopyTradingBot {
         }
       }
 
-      // Validate against Polymarket's 5-share minimum for BUY orders
-      if (trade.side === 'BUY') {
-        const MIN_SHARES = 5;
-        const estimatedShares = allocatedSize / tradePrice;
-        if (estimatedShares < MIN_SHARES) {
-          const minUsdNeeded = Math.ceil(MIN_SHARES * tradePrice * 100) / 100;
-          if (minUsdNeeded <= this.config.maxPositionSize) {
-            allocatedSize = minUsdNeeded;
-            console.log(`  Bumped to $${allocatedSize.toFixed(2)} for ${MIN_SHARES}-share minimum`);
-          } else {
-            console.log(`\n⏭️  Skipping trade (need $${minUsdNeeded.toFixed(2)} for ${MIN_SHARES}-share min, exceeds max $${this.config.maxPositionSize})`);
-            console.log('='.repeat(50) + '\n');
-            return;
-          }
-        }
-      }
+      // Polymarket's actual minimum is ~$1 or ~1 share.
+      // Let the exchange reject if truly too small — don't over-filter here.
 
       finalSize = allocatedSize;
     } catch (err: any) {
@@ -1211,8 +1197,8 @@ export class CopyTradingBot {
     for (const pos of missing) {
       if (!this.isRunning && placed > 0) break; // Stop if shutting down
       try {
-        // Skip positions too small for Polymarket minimum (5 shares)
-        if (pos.size < 5) continue;
+        // Skip positions too small for Polymarket minimum (~1 share)
+        if (pos.size < 1) continue;
 
         const tpPercent = this.config.takeProfitPercent / 100;
         const takeProfitPrice = Math.min(0.99, Math.round((pos.avgPrice * (1 + tpPercent)) * 100) / 100);
