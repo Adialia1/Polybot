@@ -2,7 +2,7 @@
   "dryRun": false,
   "enableTrading": true,
   "userAccountSize": 25,
-  "maxPositionSize": 2,
+  "maxPositionSize": 3,
   "minTradeSize": 1,
   "fixedTradePercent": 10,
   "minProbability": 0.05,

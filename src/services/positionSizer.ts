@@ -171,23 +171,8 @@ export class PositionSizer {
       }
     }
 
-    // Validate against Polymarket's 5-share minimum for BUY orders
-    if (cappedSize > 0 && trade.side === 'BUY') {
-      const MIN_SHARES = 5;
-      const estimatedShares = cappedSize / tradePrice;
-      if (estimatedShares < MIN_SHARES) {
-        const minUsdNeeded = MIN_SHARES * tradePrice;
-        if (minUsdNeeded <= this.maxPositionSize) {
-          // Bump up to meet the share minimum (within our max position limit)
-          cappedSize = Math.ceil(minUsdNeeded * 100) / 100; // Round up to nearest cent
-          reason = `raised to $${cappedSize.toFixed(2)} for ${MIN_SHARES}-share minimum`;
-        } else {
-          // Can't meet share minimum without exceeding max position size
-          cappedSize = 0;
-          reason = `skipped (need $${minUsdNeeded.toFixed(2)} for ${MIN_SHARES}-share min, exceeds max $${this.maxPositionSize})`;
-        }
-      }
-    }
+    // Polymarket's actual minimum is ~$1 or ~1 share, not 5.
+    // Let the exchange reject if truly too small — don't over-filter here.
 
     return {
       originalTradeValue,
