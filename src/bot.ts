@@ -701,17 +701,14 @@ export class CopyTradingBot {
       }
     }
 
-    // Per-position cap: maxPositionValue controls total position size (0 = unlimited)
-    // Separate from maxPositionSize which caps individual trade size
+    // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
+    // Uses totalCost (actual USD spent) instead of size*avgPrice which drifts after syncs
     const maxPosValue = (this.config as any).maxPositionValue || 0;
     if (trade.side === 'BUY' && maxPosValue > 0) {
-      const existingPosition = this.stateManager.getPosition(trade.asset);
-      if (existingPosition) {
-        const currentValue = existingPosition.size * existingPosition.avgPrice;
-        if (currentValue >= maxPosValue) {
-          console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - position already $${currentValue.toFixed(2)} (max: $${maxPosValue})`);
-          return;
-        }
+      const totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
+      if (totalSpent >= maxPosValue) {
+        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - already spent $${totalSpent.toFixed(2)} (max: $${maxPosValue})`);
+        return;
       }
     }
 

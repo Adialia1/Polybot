@@ -23,6 +23,7 @@ export interface BotState {
       slug: string;
       entryTime: number;
       walletAlias?: string; // Track which trader opened this position
+      totalCost?: number; // Running total of actual USD spent on buys (reliable position cap)
       highestPrice?: number; // Highest price reached for trailing stop
       stopLossOrderId?: string; // GTC limit order ID for stop loss
       takeProfitOrderId?: string; // GTC limit order ID for take profit
@@ -218,6 +219,9 @@ export class StateManager {
       } else {
         // Update position
         if (sizeDelta > 0) {
+          // Track actual dollars spent (must compute before avgPrice update)
+          const previousCost = existing.totalCost || (existing.size * existing.avgPrice);
+          existing.totalCost = previousCost + (price * sizeDelta);
           existing.avgPrice = ((existing.avgPrice * existing.size) + (price * sizeDelta)) / newSize;
         }
         existing.size = newSize;
@@ -228,6 +232,7 @@ export class StateManager {
         asset,
         size: sizeDelta,
         avgPrice: price,
+        totalCost: price * sizeDelta, // Track actual dollars spent from the start
         title: metadata?.title || 'Unknown',
         outcome: metadata?.outcome || 'Unknown',
         slug: metadata?.slug || '',
@@ -246,6 +251,16 @@ export class StateManager {
 
   getPositionSize(asset: string): number {
     return this.state.positions[asset]?.size || 0;
+  }
+
+  /**
+   * Get total dollars spent on a position (reliable for position cap checks).
+   * Falls back to size * avgPrice for positions created before totalCost was tracked.
+   */
+  getPositionTotalCost(asset: string): number {
+    const pos = this.state.positions[asset];
+    if (!pos) return 0;
+    return pos.totalCost || (pos.size * pos.avgPrice);
   }
 
   /**
