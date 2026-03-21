@@ -720,43 +720,19 @@ export class CopyTradingBot {
       }
     }
 
-    // Per-position cap: use MAX of API + local state + pending queue (belt AND suspenders)
+    // Per-position cap: local state + pending queue orders
     const maxPosValue = this.config.maxPositionValue || 0;
     let remainingBudget = Infinity;
-    console.log(`  [CAP CHECK] maxPositionValue=${maxPosValue}, asset=${trade.asset.slice(0, 15)}...`);
     if (trade.side === 'BUY' && maxPosValue > 0) {
-      // Layer 1: Local state (always available, updated on every execution)
       const localSpent = this.stateManager.getPositionTotalCost(trade.asset);
-
-      // Layer 2: Polymarket API (source of truth, but can lag)
-      let apiSpent = 0;
-      try {
-        const funder = this.config.funderAddress;
-        if (funder) {
-          const res = await fetch(`https://data-api.polymarket.com/positions?user=${funder.toLowerCase()}&asset=${trade.asset}&limit=1`);
-          if (res.ok) {
-            const positions = await res.json();
-            if (Array.isArray(positions) && positions.length > 0) {
-              apiSpent = parseFloat(positions[0].totalBought || '0');
-            }
-          }
-        }
-      } catch {
-        // API failed — local state is the fallback
-      }
-
-      // Layer 3: Pending orders in queue (not yet executed)
       const pendingForAsset = this.orderQueue.getPendingAmount(trade.asset);
-
-      // Use MAXIMUM of API and local state — whichever is higher is more accurate
-      const totalSpent = Math.max(apiSpent, localSpent);
-      const effectiveSpent = totalSpent + pendingForAsset;
+      const effectiveSpent = localSpent + pendingForAsset;
       remainingBudget = maxPosValue - effectiveSpent;
 
-      console.log(`  [CAP CHECK] api=$${apiSpent.toFixed(2)} local=$${localSpent.toFixed(2)} pending=$${pendingForAsset.toFixed(2)} effective=$${effectiveSpent.toFixed(2)} remaining=$${remainingBudget.toFixed(2)}`);
+      console.log(`  [CAP] $${localSpent.toFixed(2)} spent + $${pendingForAsset.toFixed(2)} pending = $${effectiveSpent.toFixed(2)} / $${maxPosValue} max`);
 
       if (remainingBudget < this.config.minTradeSize) {
-        console.log(`  ❌ [PositionCap] BLOCKED "${trade.title}" — $${effectiveSpent.toFixed(2)} spent (max $${maxPosValue})`);
+        console.log(`  ❌ [CAP] BLOCKED "${trade.title}" — $${effectiveSpent.toFixed(2)} (max $${maxPosValue})`);
         return;
       }
     }
