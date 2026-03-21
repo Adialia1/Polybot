@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "node dist/bot.js",
     "bot": "tsx src/bot.ts",
     "positions": "tsx src/index.ts positions",
     "trades": "tsx src/index.ts trades",
