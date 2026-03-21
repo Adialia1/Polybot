@@ -720,12 +720,15 @@ export class CopyTradingBot {
       }
     }
 
-    // Per-position cap: check ACTUAL position value from Polymarket API + pending queue orders
+    // Per-position cap: use MAX of API + local state + pending queue (belt AND suspenders)
     const maxPosValue = (this.config as any).maxPositionValue || 0;
     let remainingBudget = Infinity;
     if (trade.side === 'BUY' && maxPosValue > 0) {
-      // Check real position from Polymarket API (source of truth)
-      let totalSpent = 0;
+      // Layer 1: Local state (always available, updated on every execution)
+      const localSpent = this.stateManager.getPositionTotalCost(trade.asset);
+
+      // Layer 2: Polymarket API (source of truth, but can lag)
+      let apiSpent = 0;
       try {
         const funder = this.config.funderAddress;
         if (funder) {
@@ -733,21 +736,24 @@ export class CopyTradingBot {
           if (res.ok) {
             const positions = await res.json();
             if (Array.isArray(positions) && positions.length > 0) {
-              totalSpent = parseFloat(positions[0].totalBought || '0');
+              apiSpent = parseFloat(positions[0].totalBought || '0');
             }
           }
         }
       } catch {
-        // Fallback to local state if API fails
-        totalSpent = this.stateManager.getPositionTotalCost(trade.asset);
+        // API failed — local state is the fallback
       }
 
-      // Also count pending orders in the queue (not yet executed)
+      // Layer 3: Pending orders in queue (not yet executed)
       const pendingForAsset = this.orderQueue.getPendingAmount(trade.asset);
+
+      // Use MAXIMUM of API and local state — whichever is higher is more accurate
+      const totalSpent = Math.max(apiSpent, localSpent);
       const effectiveSpent = totalSpent + pendingForAsset;
       remainingBudget = maxPosValue - effectiveSpent;
+
       if (remainingBudget < this.config.minTradeSize) {
-        console.log(`[PositionCap] Skipped ${wallet.alias}'s BUY on "${trade.title}" - API says $${totalSpent.toFixed(2)} spent + $${pendingForAsset.toFixed(2)} pending (max: $${maxPosValue})`);
+        console.log(`[PositionCap] Skipped "${trade.title}" — api=$${apiSpent.toFixed(2)} local=$${localSpent.toFixed(2)} pending=$${pendingForAsset.toFixed(2)} total=$${effectiveSpent.toFixed(2)} (max $${maxPosValue})`);
         return;
       }
     }
@@ -983,6 +989,26 @@ export class CopyTradingBot {
               conditionId: order.trade.conditionId,
             }
           );
+
+          // Log trade to persistent trade log (append-only, for cap verification)
+          try {
+            const { appendFileSync } = require('fs');
+            const logEntry = JSON.stringify({
+              t: Date.now(),
+              conditionId: order.trade.conditionId,
+              asset: order.trade.asset,
+              market: order.trade.title,
+              outcome: order.trade.outcome,
+              side: order.trade.side,
+              amount: order.amount,
+              shares: result.details.size,
+              price: result.details.price,
+              totalCost: this.stateManager.getPositionTotalCost(order.trade.asset),
+              wallet: order.walletAlias,
+              orderId: result.orderId,
+            });
+            appendFileSync('./data/trade-log.jsonl', logEntry + '\n');
+          } catch { /* don't crash on log failure */ }
 
           // For BUY orders on new positions, set the wallet alias and place SL/TP orders
           if (order.trade.side === 'BUY') {
