@@ -166,6 +166,7 @@ export class CopyTradingBot {
         dryRun: this.config.dryRun,
       }, this.stateManager);
       this.notifier.setRedeemer(this.redeemer);
+      this.notifier.setOnStop(() => this.stop());
 
       // Initialize reconciler
       this.reconciler = new PositionReconciler({

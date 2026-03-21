@@ -56,6 +56,7 @@ export class TelegramNotifier {
   private enabled: boolean = false;
   private stateManager: StateManager | null = null;
   private redeemer: Redeemer | null = null;
+  private onStopCallback: (() => void) | null = null;
   private startTime: number = Date.now();
 
   constructor(stateManager?: StateManager) {
@@ -99,6 +100,10 @@ export class TelegramNotifier {
    */
   setRedeemer(redeemer: Redeemer): void {
     this.redeemer = redeemer;
+  }
+
+  setOnStop(callback: () => void): void {
+    this.onStopCallback = callback;
   }
 
   /**
@@ -245,6 +250,22 @@ export class TelegramNotifier {
       await this.sendMessage(message);
     });
 
+    // /stop - Stop the bot gracefully
+    this.bot.onText(/\/stop/, async (msg) => {
+      if (msg.chat.id.toString() !== this.chatId) return;
+
+      await this.sendMessage('🛑 <b>Stopping bot...</b>\nThe auto-deploy script will restart it if running.');
+
+      if (this.onStopCallback) {
+        setTimeout(() => {
+          this.onStopCallback!();
+          process.exit(0);
+        }, 1000);
+      } else {
+        setTimeout(() => process.exit(0), 1000);
+      }
+    });
+
     // /help - Show available commands
     this.bot.onText(/\/help/, async (msg) => {
       if (msg.chat.id.toString() !== this.chatId) return;
@@ -257,6 +278,7 @@ export class TelegramNotifier {
 /stats - Show trading statistics
 /balance - Show balance & redeemable positions
 /redeem - Redeem all resolved winning positions
+/stop - Stop the bot (auto-deploy will restart)
 /help - Show this help message
       `.trim();
 
