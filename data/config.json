@@ -8,7 +8,7 @@
   "minTradeSize": 1,
   "fixedTradePercent": 0,
   "minProbability": 0.05,
-  "maxProbability": 0.95,
+  "maxProbability": 0.90,
   "maxPriceDiffPercent": 15,
   "orderSlippagePercent": 10,
   "minTraderTradeUsd": 30,
