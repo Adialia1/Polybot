@@ -663,6 +663,18 @@ export class CopyTradingBot {
       return;
     }
 
+    // Dedup: skip duplicate BUY signals for same asset within 30s window
+    // MUST be before any await to prevent race conditions from concurrent partial fills
+    if (trade.side === 'BUY') {
+      const lastProcessed = this.recentBuyDedup.get(trade.asset);
+      if (lastProcessed && Date.now() - lastProcessed < DEDUP_WINDOW_MS) {
+        console.log(`[Dedup] Skipped duplicate BUY on "${trade.title}" (last processed ${((Date.now() - lastProcessed) / 1000).toFixed(1)}s ago)`);
+        return;
+      }
+      // Lock immediately — no await can interleave between check and lock
+      this.recentBuyDedup.set(trade.asset, Date.now());
+    }
+
     // Risk checks (stale trade, price slippage)
     if (this.riskManager) {
       const riskCheck = await this.riskManager.checkTradeSignal(trade.timestamp, trade.asset, parseFloat(String(trade.price)), trade.side as 'BUY' | 'SELL');
@@ -690,19 +702,6 @@ export class CopyTradingBot {
         console.log(`[Limit] Skipped ${wallet.alias}'s BUY on "${trade.title}" - at max positions (${currentPositions}/${this.config.maxOpenPositions})`);
         return;
       }
-    }
-
-    // Dedup: skip duplicate BUY signals for same asset within 30s window
-    // Set timestamp IMMEDIATELY to block concurrent signals from the same polling batch
-    if (trade.side === 'BUY') {
-      const lastProcessed = this.recentBuyDedup.get(trade.asset);
-      if (lastProcessed && Date.now() - lastProcessed < DEDUP_WINDOW_MS) {
-        console.log(`[Dedup] Skipped duplicate BUY on "${trade.title}" (last processed ${((Date.now() - lastProcessed) / 1000).toFixed(1)}s ago)`);
-        return;
-      }
-      // Lock immediately — prevents race condition where multiple fills from the same
-      // RN1 order all pass dedup before any of them set the timestamp
-      this.recentBuyDedup.set(trade.asset, Date.now());
     }
 
     // Per-position cap: maxPositionValue controls total dollars spent on a position (0 = unlimited)
