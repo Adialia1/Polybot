@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/bot.js",
     "bot": "tsx src/bot.ts",
+    "telegram": "tsx src/multiUserBot.ts",
     "positions": "tsx src/index.ts positions",
     "trades": "tsx src/index.ts trades",
     "status": "tsx src/scripts/status.ts",
@@ -56,6 +57,7 @@
     "@scure/bip39": "2.0.1",
     "@types/node": "25.3.5",
     "axios": "1.13.6",
+    "better-sqlite3": "^12.8.0",
     "dotenv": "17.3.1",
     "node-telegram-bot-api": "^0.67.0",
     "tsx": "4.21.0",
@@ -64,6 +66,7 @@
     "ws": "8.19.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node-telegram-bot-api": "^0.64.0",
     "@types/ws": "8.18.1"
   }
