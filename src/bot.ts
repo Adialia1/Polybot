@@ -304,8 +304,8 @@ export class CopyTradingBot {
     // Start auto-sell for resolved positions (>= $0.98)
     this.startResolvedPositionSeller();
 
-    // Start auto-redeem for resolved positions (on-chain redemption)
-    this.startAutoRedeem();
+    // Auto-redeem disabled until POL gas is funded on the wallet
+    // this.startAutoRedeem();
 
     // Place TP orders for existing positions that don't have them yet
     await this.placeProtectionOrdersForExistingPositions();
