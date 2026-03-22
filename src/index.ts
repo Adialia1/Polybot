@@ -53,6 +53,7 @@ async function main() {
       privateKey: config.privateKey,
       funderAddress: config.funderAddress,
       dryRun: config.dryRun,
+      maxBuyPrice: config.maxProbability,
       apiCredentials,
     });
 

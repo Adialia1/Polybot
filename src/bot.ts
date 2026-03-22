@@ -147,6 +147,7 @@ export class CopyTradingBot {
         dryRun: this.config.dryRun,
         signatureType: this.config.signatureType,
         orderSlippagePercent: this.config.orderSlippagePercent,
+        maxBuyPrice: this.config.maxProbability,
         apiCredentials,
       });
 
