@@ -13,6 +13,7 @@ export interface TraderConfig {
   dryRun?: boolean; // If true, don't actually execute trades
   signatureType?: number; // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
   orderSlippagePercent?: number; // Slippage tolerance for market orders
+  maxBuyPrice?: number; // Hard cap on buy price (e.g. maxProbability) - slippage cannot exceed this
   apiCredentials?: {
     key: string;
     secret: string;
@@ -337,8 +338,12 @@ export class Trader {
     // IMPORTANT: Add slippage tolerance to the price limit! The trader's execution price
     // is often stale by the time we copy. Without tolerance, orders won't fill if
     // the market moved even 1 cent above the trader's price.
-    const buyPriceLimit = Math.min(0.99, price * (1 + this.slippage));
-    console.log(`[Trader] BUY price limit: $${buyPriceLimit.toFixed(4)} (trader: $${price.toFixed(4)}, +${(this.slippage * 100).toFixed(0)}% slippage)`);
+    let buyPriceLimit = Math.min(0.99, price * (1 + this.slippage));
+    // Hard cap: never pay more than maxBuyPrice (e.g. maxProbability config)
+    if (this.config.maxBuyPrice && this.config.maxBuyPrice > 0) {
+      buyPriceLimit = Math.min(buyPriceLimit, this.config.maxBuyPrice);
+    }
+    console.log(`[Trader] BUY price limit: $${buyPriceLimit.toFixed(4)} (trader: $${price.toFixed(4)}, +${(this.slippage * 100).toFixed(0)}% slippage${this.config.maxBuyPrice ? `, cap: $${this.config.maxBuyPrice}` : ''})`);
 
     const result = await this.client.createAndPostMarketOrder(
       {
