@@ -53,6 +53,9 @@ export class CopyTradingBot {
   private recentSignals: RecentSignal[] = [];
   // Dedup map: asset -> last processed timestamp (prevents burst duplicates)
   private recentBuyDedup: Map<string, number> = new Map();
+  // Circuit breaker: pause trading when account has no balance
+  private balanceFailCount = 0;
+  private balancePausedUntil = 0;
 
   constructor() {
     this.clobApi = new ClobApiClient();
@@ -643,6 +646,11 @@ export class CopyTradingBot {
   }
 
   private async handleTradeSignal(signal: TradeSignal, wallet: WalletConfig): Promise<void> {
+    // Circuit breaker: if too many balance failures, wait before trying again
+    if (this.balancePausedUntil > Date.now()) {
+      return; // Silently skip — don't spam logs
+    }
+
     // Check if bot is paused
     if (this.isPaused) {
       console.log(`[Paused] Ignoring trade signal from ${wallet.alias} - bot is paused`);
@@ -935,6 +943,10 @@ export class CopyTradingBot {
       const result = await this.trader.copyTrade(order.trade, order.amount);
 
       if (result.success) {
+        // Circuit breaker: trade succeeded, reset balance fail counter
+        this.balanceFailCount = 0;
+        this.balancePausedUntil = 0;
+
         console.log(`\n✅ Trade ${this.config.dryRun ? 'SIMULATED' : 'EXECUTED'} successfully!${isRetry ? ` (after ${retryCount} retries)` : ''}`);
         if (result.orderId) {
           console.log(`  Order ID: ${result.orderId}`);
@@ -1131,6 +1143,16 @@ export class CopyTradingBot {
         title: order.trade.title?.slice(0, 40),
         amount: order.amount,
       });
+
+      // Circuit breaker: if balance error, slow down instead of spamming
+      if (errorMessage.includes('not enough balance') || errorMessage.includes('not enough allowance')) {
+        this.balanceFailCount++;
+        if (this.balanceFailCount >= 3) {
+          const pauseSec = 30;
+          this.balancePausedUntil = Date.now() + pauseSec * 1000;
+          console.log(`\n💤 [CircuitBreaker] No balance — pausing new trades for ${pauseSec}s (will retry after)`);
+        }
+      }
 
       if (isNonRetryable) {
         console.log(`\n❌ Trade failed (non-retryable): ${errorMessage}`);
