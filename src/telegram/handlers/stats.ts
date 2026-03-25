@@ -29,7 +29,7 @@ export function registerStatsHandler(bot: TelegramBot, db: UserDb): void {
       if (state.traderStats) {
         const entries = Object.entries(state.traderStats) as [string, any][];
         if (entries.length > 0) {
-          traderStatsText = '\n\n<b>Per-Trader Stats:</b>\n';
+          traderStatsText = '\n\n<b>👥 Per-Trader Stats:</b>\n';
           entries.forEach(([alias, ts]) => {
             const winRate = ts.totalTrades > 0 ? ((ts.wins / ts.totalTrades) * 100).toFixed(0) : '0';
             traderStatsText += `• <b>${alias}</b>: ${ts.totalTrades} trades, ${winRate}% win, P&L: $${ts.totalPnL?.toFixed(2) || '0.00'}\n`;
@@ -40,15 +40,15 @@ export function registerStatsHandler(bot: TelegramBot, db: UserDb): void {
       const message = `
 📈 <b>Trading Statistics</b>
 
-<b>Total Trades:</b> ${stats.totalTrades}
-<b>Successful:</b> ${stats.successfulTrades}
-<b>Failed:</b> ${stats.failedTrades}
-<b>Success Rate:</b> ${successRate}%
-<b>Total Volume:</b> $${(stats.totalVolume || 0).toFixed(2)}
+<b>🔢 Total Trades:</b> ${stats.totalTrades}
+<b>✅ Successful:</b> ${stats.successfulTrades}
+<b>❌ Failed:</b> ${stats.failedTrades}
+<b>🎯 Success Rate:</b> ${successRate}%
+<b>💰 Total Volume:</b> $${(stats.totalVolume || 0).toFixed(2)}
 
-<b>Open Positions:</b> ${positions.length}
-<b>Total Position Value:</b> $${totalValue.toFixed(2)}
-<b>Daily P&L:</b> $${(state.dailyPnL || 0).toFixed(2)}${traderStatsText}
+<b>📦 Open Positions:</b> ${positions.length}
+<b>💵 Total Position Value:</b> $${totalValue.toFixed(2)}
+<b>📊 Daily P&L:</b> $${(state.dailyPnL || 0).toFixed(2)}${traderStatsText}
       `.trim();
 
       const buttons = [

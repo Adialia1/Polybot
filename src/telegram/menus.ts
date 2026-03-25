@@ -65,11 +65,11 @@ export function settingsMenu(): InlineMarkup {
 export function sizingMenu(settings: any): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn(`Account Size: $${settings.userAccountSize}`, 'set:userAccountSize')],
-      [btn(`Max Position: $${settings.maxPositionSize}`, 'set:maxPositionSize')],
-      [btn(`Min Trade: $${settings.minTradeSize}`, 'set:minTradeSize')],
-      [btn(`Max % Per Trade: ${settings.maxPercentagePerTrade}%`, 'set:maxPercentagePerTrade')],
-      [btn(`Max Position Value: $${settings.maxPositionValue || '∞'}`, 'set:maxPositionValue')],
+      [btn(`💵 Account Size: $${settings.userAccountSize}`, 'set:userAccountSize')],
+      [btn(`📏 Max Position: $${settings.maxPositionSize}`, 'set:maxPositionSize')],
+      [btn(`🔻 Min Trade: $${settings.minTradeSize}`, 'set:minTradeSize')],
+      [btn(`📊 Max % Per Trade: ${settings.maxPercentagePerTrade}%`, 'set:maxPercentagePerTrade')],
+      [btn(`🏷 Max Position Value: $${settings.maxPositionValue || '∞'}`, 'set:maxPositionValue')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -78,11 +78,11 @@ export function sizingMenu(settings: any): InlineMarkup {
 export function riskMenu(settings: any): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn(`Stop Loss: ${settings.stopLossPercent}%`, 'set:stopLossPercent')],
-      [btn(`Take Profit: +${settings.takeProfitPercent}%`, 'set:takeProfitPercent')],
-      [btn(`Trailing Stop: ${settings.trailingStopPercent}%`, 'set:trailingStopPercent')],
-      [btn(`Daily Loss Limit: $${settings.dailyLossLimit || '∞'}`, 'set:dailyLossLimit')],
-      [btn(`Max Open Positions: ${settings.maxOpenPositions || '∞'}`, 'set:maxOpenPositions')],
+      [btn(`🔻 Stop Loss: ${settings.stopLossPercent}%`, 'set:stopLossPercent')],
+      [btn(`🎯 Take Profit: +${settings.takeProfitPercent}%`, 'set:takeProfitPercent')],
+      [btn(`📉 Trailing Stop: ${settings.trailingStopPercent}%`, 'set:trailingStopPercent')],
+      [btn(`🚫 Daily Loss Limit: $${settings.dailyLossLimit || '∞'}`, 'set:dailyLossLimit')],
+      [btn(`📦 Max Open Positions: ${settings.maxOpenPositions || '∞'}`, 'set:maxOpenPositions')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -91,8 +91,8 @@ export function riskMenu(settings: any): InlineMarkup {
 export function filtersMenu(settings: any): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn(`Min Probability: ${(settings.minProbability * 100).toFixed(0)}%`, 'set:minProbability')],
-      [btn(`Max Probability: ${(settings.maxProbability * 100).toFixed(0)}%`, 'set:maxProbability')],
+      [btn(`⬇️ Min Probability: ${(settings.minProbability * 100).toFixed(0)}%`, 'set:minProbability')],
+      [btn(`⬆️ Max Probability: ${(settings.maxProbability * 100).toFixed(0)}%`, 'set:maxProbability')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -101,9 +101,9 @@ export function filtersMenu(settings: any): InlineMarkup {
 export function executionMenu(settings: any): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn(`Slippage: ${settings.orderSlippagePercent}%`, 'set:orderSlippagePercent')],
-      [btn(`Copy Sells: ${settings.copySells ? '✅' : '❌'}`, 'toggle:copySells')],
-      [btn(`Conflict Strategy: ${settings.conflictStrategy}`, 'set:conflictStrategy')],
+      [btn(`🎚 Slippage: ${settings.orderSlippagePercent}%`, 'set:orderSlippagePercent')],
+      [btn(`📤 Copy Sells: ${settings.copySells ? '✅' : '❌'}`, 'toggle:copySells')],
+      [btn(`⚔️ Conflict Strategy: ${settings.conflictStrategy}`, 'set:conflictStrategy')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -112,7 +112,7 @@ export function executionMenu(settings: any): InlineMarkup {
 export function timeExitsMenu(settings: any): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn(`Max Hold Time: ${settings.maxHoldTimeHours || 'OFF'}h`, 'set:maxHoldTimeHours')],
+      [btn(`⏱ Max Hold Time: ${settings.maxHoldTimeHours || 'OFF'}h`, 'set:maxHoldTimeHours')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -123,8 +123,8 @@ export function keywordsMenu(settings: any): InlineMarkup {
   const wl = settings.whitelistKeywords || 'none';
   return {
     inline_keyboard: [
-      [btn(`Blacklist: ${bl.length > 20 ? bl.slice(0, 20) + '...' : bl}`, 'set:blacklistKeywords')],
-      [btn(`Whitelist: ${wl.length > 20 ? wl.slice(0, 20) + '...' : wl}`, 'set:whitelistKeywords')],
+      [btn(`🚫 Blacklist: ${bl.length > 20 ? bl.slice(0, 20) + '...' : bl}`, 'set:blacklistKeywords')],
+      [btn(`✅ Whitelist: ${wl.length > 20 ? wl.slice(0, 20) + '...' : wl}`, 'set:whitelistKeywords')],
       [btn('⬅️ Back', 'menu:settings')],
     ],
   };
@@ -133,10 +133,10 @@ export function keywordsMenu(settings: any): InlineMarkup {
 export function conflictStrategyMenu(): InlineMarkup {
   return {
     inline_keyboard: [
-      [btn('First Signal Wins', 'conflict:first')],
-      [btn('Skip Conflicts', 'conflict:skip')],
-      [btn('Majority Rules', 'conflict:majority')],
-      [btn('Highest Allocation', 'conflict:highest_allocation')],
+      [btn('🥇 First Signal Wins', 'conflict:first')],
+      [btn('⏭ Skip Conflicts', 'conflict:skip')],
+      [btn('👥 Majority Rules', 'conflict:majority')],
+      [btn('💎 Highest Allocation', 'conflict:highest_allocation')],
       [btn('⬅️ Back', 'settings:execution')],
     ],
   };
@@ -151,7 +151,7 @@ export function tradingMenu(isRunning: boolean, isDryRun: boolean): InlineMarkup
     buttons.push([btn('▶️ Start Trading', 'trading:start')]);
   }
 
-  buttons.push([btn(`Dry Run: ${isDryRun ? '✅ ON' : '❌ OFF'}`, 'toggle:dryRun')]);
+  buttons.push([btn(`🧪 Dry Run: ${isDryRun ? '✅ ON' : '❌ OFF'}`, 'toggle:dryRun')]);
   buttons.push([btn('⬅️ Back', 'menu:main')]);
 
   return { inline_keyboard: buttons };

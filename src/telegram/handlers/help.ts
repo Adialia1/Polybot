@@ -17,34 +17,34 @@ export function registerHelpHandler(bot: TelegramBot): void {
 3. ⚙️ Configure your settings
 4. ▶️ Start trading!
 
-<b>How it works:</b>
-• Monitors followed traders in real-time
-• Copies their trades to your wallet
-• Scales position sizes to your account
-• Manages exits via stop-loss, take-profit, trailing stops
+<b>🔧 How it works:</b>
+• 📡 Monitors followed traders in real-time
+• 🔄 Copies their trades to your wallet
+• ⚖️ Scales position sizes to your account
+• 🛡 Manages exits via stop-loss, take-profit, trailing stops
 
-<b>Wallet Types:</b>
-• <b>Browser</b> - MetaMask/Rabby with Polymarket proxy
-• <b>Email</b> - Magic Link exported key
-• <b>EOA</b> - Standalone wallet
+<b>💼 Wallet Types:</b>
+• 🦊 <b>Browser</b> - MetaMask/Rabby with Polymarket proxy
+• 📧 <b>Email</b> - Magic Link exported key
+• 🔐 <b>EOA</b> - Standalone wallet
 
-<b>Key Settings:</b>
-• <b>Slippage</b> - Max price deviation allowed
-• <b>Stop Loss</b> - Auto-sell at loss threshold
-• <b>Take Profit</b> - Auto-sell at profit target
-• <b>Trailing Stop</b> - Lock in profits as price rises
-• <b>Dry Run</b> - Test without real trades
+<b>⚙️ Key Settings:</b>
+• 🎚 <b>Slippage</b> - Max price deviation allowed
+• 🔻 <b>Stop Loss</b> - Auto-sell at loss threshold
+• 🎯 <b>Take Profit</b> - Auto-sell at profit target
+• 📉 <b>Trailing Stop</b> - Lock in profits as price rises
+• 🧪 <b>Dry Run</b> - Test without real trades
 
-<b>Commands:</b>
-/start - Main menu
-/menu - Show menu
-/help - This help message
+<b>📋 Commands:</b>
+/start - 🏠 Main menu
+/menu - 📱 Show menu
+/help - ❓ This help message
 
-<b>Tips:</b>
-• Start with Dry Run mode ON
-• Use small position sizes initially
-• Diversify across multiple traders
-• Set stop-loss to protect capital
+<b>💡 Tips:</b>
+• 🧪 Start with Dry Run mode ON
+• 🤏 Use small position sizes initially
+• 🌐 Diversify across multiple traders
+• 🛡 Set stop-loss to protect capital
       `.trim();
 
       await bot.editMessageText(helpText, {

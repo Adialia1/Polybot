@@ -126,8 +126,8 @@ export class UserBotManager {
     await this.sendNotification(chatId,
       `🟢 <b>Trading Started!</b>\n\n` +
       `Mode: ${settings.dryRun ? '🔶 Dry Run' : '🟢 LIVE'}\n` +
-      `Following: ${trackedWallets.map(t => t.alias).join(', ')}\n` +
-      `Max position: $${settings.maxPositionSize}`
+      `👁 Following: ${trackedWallets.map(t => t.alias).join(', ')}\n` +
+      `💰 Max position: $${settings.maxPositionSize}`
     );
   }
 
@@ -276,20 +276,20 @@ export class UserBotManager {
         const emoji = trade.side === 'BUY' ? '🟢' : '🔴';
         await this.sendNotification(chatId,
           `${emoji} <b>Trade Executed</b>\n\n` +
-          `<b>Side:</b> ${trade.side}\n` +
-          `<b>Market:</b> ${trade.title}\n` +
-          `<b>Outcome:</b> ${trade.outcome}\n` +
-          `<b>Amount:</b> $${order.amount.toFixed(2)}\n` +
-          `<b>Price:</b> ${(price * 100).toFixed(1)}%\n` +
-          `<b>Copied from:</b> ${order.walletAlias}`
+          `<b>📌 Side:</b> ${trade.side}\n` +
+          `<b>🏪 Market:</b> ${trade.title}\n` +
+          `<b>🎲 Outcome:</b> ${trade.outcome}\n` +
+          `<b>💵 Amount:</b> $${order.amount.toFixed(2)}\n` +
+          `<b>💲 Price:</b> ${(price * 100).toFixed(1)}%\n` +
+          `<b>👤 Copied from:</b> ${order.walletAlias}`
         );
       } else {
         state.stats.failedTrades++;
         await this.sendNotification(chatId,
           `❌ <b>Trade Failed</b>\n\n` +
-          `<b>Side:</b> ${trade.side}\n` +
-          `<b>Market:</b> ${trade.title}\n` +
-          `<b>Error:</b> ${result.error}`
+          `<b>📌 Side:</b> ${trade.side}\n` +
+          `<b>🏪 Market:</b> ${trade.title}\n` +
+          `<b>⚠️ Error:</b> ${result.error}`
         );
       }
 
@@ -308,7 +308,7 @@ export class UserBotManager {
       this.db.saveUserState(chatId, state);
     } catch (error: any) {
       console.error(`[User ${chatId}] Order execution error:`, error.message);
-      await this.sendNotification(chatId, `❌ Order error: ${error.message}`);
+      await this.sendNotification(chatId, `❌ ⚠️ Order error: ${error.message}`);
     }
   }
 

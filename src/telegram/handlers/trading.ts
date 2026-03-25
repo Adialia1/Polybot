@@ -20,8 +20,8 @@ export function registerTradingHandler(bot: TelegramBot, db: UserDb, getBotManag
       let statusText = '▶️ <b>Trading Control</b>\n\n';
       statusText += `Status: ${isRunning ? '🟢 RUNNING' : '⏹ STOPPED'}\n`;
       statusText += `Mode: ${settings.dryRun ? '🔶 Dry Run' : '🟢 LIVE'}\n`;
-      statusText += `Wallets: ${wallets.length}\n`;
-      statusText += `Following: ${tracked.length} traders\n`;
+      statusText += `💼 Wallets: ${wallets.length}\n`;
+      statusText += `👁 Following: ${tracked.length} traders\n`;
 
       if (wallets.length === 0) {
         statusText += '\n⚠️ Connect a wallet first!';
@@ -60,8 +60,8 @@ export function registerTradingHandler(bot: TelegramBot, db: UserDb, getBotManag
         await bot.editMessageText(
           `🟢 <b>Trading Started!</b>\n\n` +
           `Mode: ${settings.dryRun ? '🔶 Dry Run (simulated)' : '🟢 LIVE'}\n` +
-          `Following: ${tracked.length} trader(s)\n` +
-          `Max position: $${settings.maxPositionSize}`,
+          `👁 Following: ${tracked.length} trader(s)\n` +
+          `💰 Max position: $${settings.maxPositionSize}`,
           {
             chat_id: chatId,
             message_id: query.message.message_id,

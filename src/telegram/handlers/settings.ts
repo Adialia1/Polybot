@@ -172,10 +172,10 @@ export function registerSettingsHandler(bot: TelegramBot, db: UserDb): void {
       await bot.editMessageText(
         '⚔️ <b>Conflict Strategy</b>\n\n' +
         'When followed traders make opposite trades:\n\n' +
-        '<b>First</b> - Follow the first signal\n' +
-        '<b>Skip</b> - Don\'t trade on conflicts\n' +
-        '<b>Majority</b> - Follow the majority\n' +
-        '<b>Highest Allocation</b> - Follow the highest-allocated trader',
+        '🥇 <b>First</b> - Follow the first signal\n' +
+        '⏭ <b>Skip</b> - Don\'t trade on conflicts\n' +
+        '👥 <b>Majority</b> - Follow the majority\n' +
+        '💎 <b>Highest Allocation</b> - Follow the highest-allocated trader',
         {
           chat_id: chatId,
           message_id: query.message.message_id,
@@ -189,7 +189,7 @@ export function registerSettingsHandler(bot: TelegramBot, db: UserDb): void {
     if (query.data?.startsWith('conflict:')) {
       const strategy = query.data.slice(9);
       db.updateSetting(chatId, 'conflictStrategy', strategy);
-      await bot.answerCallbackQuery(query.id, { text: `Strategy: ${strategy}` });
+      await bot.answerCallbackQuery(query.id, { text: `✅ Strategy: ${strategy}` });
       const updatedSettings = db.getSettings(chatId);
       await bot.editMessageText('⚡ <b>Execution Settings</b>\n\nTap a setting to change it:', {
         chat_id: chatId,

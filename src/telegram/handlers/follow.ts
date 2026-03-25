@@ -45,7 +45,7 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
     if (query.data === 'follow:list') {
       const tracked = db.getTrackedWallets(chatId);
       if (tracked.length === 0) {
-        await bot.editMessageText('No traders being followed.', {
+        await bot.editMessageText('📭 No traders being followed yet.', {
           chat_id: chatId,
           message_id: query.message.message_id,
           reply_markup: followMenu(false),
@@ -56,8 +56,8 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
           const short = `${t.walletAddress.slice(0, 6)}...${t.walletAddress.slice(-4)}`;
           const status = t.enabled ? '✅' : '❌';
           text += `${i + 1}. ${status} <b>${t.alias}</b>\n`;
-          text += `   Address: <code>${short}</code>\n`;
-          text += `   Allocation: ${t.allocation}%\n\n`;
+          text += `   📍 Address: <code>${short}</code>\n`;
+          text += `   📊 Allocation: ${t.allocation}%\n\n`;
         });
 
         const buttons = tracked.map(t => [
@@ -81,7 +81,7 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
     if (query.data?.startsWith('follow:toggle:')) {
       const id = parseInt(query.data.split(':')[2]);
       const enabled = db.toggleTrackedWallet(chatId, id);
-      await bot.answerCallbackQuery(query.id, { text: enabled ? 'Trader enabled' : 'Trader disabled' });
+      await bot.answerCallbackQuery(query.id, { text: enabled ? '✅ Trader enabled' : '❌ Trader disabled' });
       // Refresh the list
       const tracked = db.getTrackedWallets(chatId);
       let text = '📋 <b>Followed Traders</b>\n\n';
@@ -89,8 +89,8 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
         const short = `${t.walletAddress.slice(0, 6)}...${t.walletAddress.slice(-4)}`;
         const status = t.enabled ? '✅' : '❌';
         text += `${i + 1}. ${status} <b>${t.alias}</b>\n`;
-        text += `   Address: <code>${short}</code>\n`;
-        text += `   Allocation: ${t.allocation}%\n\n`;
+        text += `   📍 Address: <code>${short}</code>\n`;
+        text += `   📊 Allocation: ${t.allocation}%\n\n`;
       });
       const buttons = tracked.map(t => [
         {
@@ -156,7 +156,7 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
       state.step = 'alias';
       await bot.sendMessage(chatId,
         `✅ Address: <code>${addr.slice(0, 6)}...${addr.slice(-4)}</code>\n\n` +
-        `Send a name/alias for this trader (e.g., "Whale1", "TopTrader"):`,
+        `✏️ Send a name/alias for this trader (e.g., "Whale1", "TopTrader"):`,
         { parse_mode: 'HTML', reply_markup: backButton('menu:follow') }
       );
       return;
@@ -167,8 +167,8 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
       state.step = 'allocation';
       followFlowState.set(chatId, { ...state, step: 'allocation' });
       await bot.sendMessage(chatId,
-        `Name: <b>${alias}</b>\n\n` +
-        `Send allocation percentage (1-100):\n` +
+        `🏷 Name: <b>${alias}</b>\n\n` +
+        `📊 Send allocation percentage (1-100):\n` +
         `This controls what % of calculated position size to use for this trader.\n` +
         `(100 = full size, 50 = half size)`,
         { parse_mode: 'HTML', reply_markup: backButton('menu:follow') }
@@ -194,9 +194,9 @@ export function registerFollowHandler(bot: TelegramBot, db: UserDb): void {
         const tracked = db.getTrackedWallets(chatId);
         await bot.sendMessage(chatId,
           `✅ <b>Trader Added!</b>\n\n` +
-          `Name: <b>${(state as any).alias}</b>\n` +
-          `Address: <code>${state.address!.slice(0, 6)}...${state.address!.slice(-4)}</code>\n` +
-          `Allocation: ${allocation}%`,
+          `🏷 Name: <b>${(state as any).alias}</b>\n` +
+          `📍 Address: <code>${state.address!.slice(0, 6)}...${state.address!.slice(-4)}</code>\n` +
+          `📊 Allocation: ${allocation}%`,
           {
             parse_mode: 'HTML',
             reply_markup: followMenu(tracked.length > 0),

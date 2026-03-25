@@ -65,7 +65,7 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
     if (query.data === 'wallet:list') {
       const wallets = db.getWallets(chatId);
       if (wallets.length === 0) {
-        await bot.editMessageText('No wallets connected.', {
+        await bot.editMessageText('📭 No wallets connected.', {
           chat_id: chatId,
           message_id: query.message.message_id,
           reply_markup: walletsMenu(false),
@@ -78,8 +78,8 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
           const defaultTag = w.isDefault ? ' ⭐ Default' : '';
           const typeNames: Record<number, string> = { 0: 'EOA', 1: 'Email', 2: 'Browser' };
           text += `${i + 1}. <b>${w.alias}</b>${defaultTag}\n`;
-          text += `   Address: <code>${short}</code>\n`;
-          text += `   Type: ${typeNames[w.signatureType] || 'Unknown'}\n\n`;
+          text += `   📍 Address: <code>${short}</code>\n`;
+          text += `   🏷 Type: ${typeNames[w.signatureType] || 'Unknown'}\n\n`;
         });
         await bot.editMessageText(text, {
           chat_id: chatId,
@@ -156,8 +156,8 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
           state.step = 'alias';
           await bot.sendMessage(chatId,
             `✅ Key accepted!\n\n` +
-            `Address: <code>${account.address}</code>\n\n` +
-            `<b>Step 2:</b> Send a name/alias for this wallet (e.g., "Main", "Trading"):`,
+            `📍 Address: <code>${account.address}</code>\n\n` +
+            `<b>Step 2:</b> ✏️ Send a name/alias for this wallet (e.g., "Main", "Trading"):`,
             { parse_mode: 'HTML', reply_markup: backButton('menu:wallets') }
           );
         } else {
@@ -165,8 +165,8 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
           state.step = 'funder_address';
           await bot.sendMessage(chatId,
             `✅ Key accepted!\n\n` +
-            `Signer: <code>${account.address}</code>\n\n` +
-            `<b>Step 2:</b> Send your Polymarket proxy/funder wallet address:`,
+            `📍 Signer: <code>${account.address}</code>\n\n` +
+            `<b>Step 2:</b> 📬 Send your Polymarket proxy/funder wallet address:`,
             { parse_mode: 'HTML', reply_markup: backButton('menu:wallets') }
           );
         }
@@ -190,7 +190,7 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
       state.step = 'alias';
       await bot.sendMessage(chatId,
         `✅ Funder address set!\n\n` +
-        `<b>Step 3:</b> Send a name/alias for this wallet (e.g., "Main", "Trading"):`,
+        `<b>Step 3:</b> ✏️ Send a name/alias for this wallet (e.g., "Main", "Trading"):`,
         { parse_mode: 'HTML', reply_markup: backButton('menu:wallets') }
       );
       return;
@@ -214,9 +214,9 @@ export function registerWalletHandler(bot: TelegramBot, db: UserDb): void {
         const short = `${state.walletAddress!.slice(0, 6)}...${state.walletAddress!.slice(-4)}`;
         await bot.sendMessage(chatId,
           `✅ <b>Wallet Connected!</b>\n\n` +
-          `Name: <b>${alias}</b>\n` +
-          `Address: <code>${short}</code>\n\n` +
-          `You can now follow traders and start copy-trading!`,
+          `🏷 Name: <b>${alias}</b>\n` +
+          `📍 Address: <code>${short}</code>\n\n` +
+          `🎉 You can now follow traders and start copy-trading!`,
           {
             parse_mode: 'HTML',
             reply_markup: walletsMenu(true),

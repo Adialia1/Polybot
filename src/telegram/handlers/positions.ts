@@ -41,10 +41,10 @@ export function registerPositionsHandler(bot: TelegramBot, db: UserDb, getBotMan
         let text = '📊 <b>Open Positions</b>\n\n';
         (positions as [string, any][]).forEach(([asset, pos], i) => {
           text += `${i + 1}. <b>${pos.outcome}</b>\n`;
-          text += `   Market: ${pos.title?.slice(0, 40) || 'Unknown'}\n`;
-          text += `   Size: ${pos.size?.toFixed(4) || '?'} shares @ $${pos.avgPrice?.toFixed(3) || '?'}\n`;
-          text += `   Value: $${((pos.size || 0) * (pos.avgPrice || 0)).toFixed(2)}\n`;
-          if (pos.walletAlias) text += `   Copied from: ${pos.walletAlias}\n`;
+          text += `   🏪 Market: ${pos.title?.slice(0, 40) || 'Unknown'}\n`;
+          text += `   📦 Size: ${pos.size?.toFixed(4) || '?'} shares @ $${pos.avgPrice?.toFixed(3) || '?'}\n`;
+          text += `   💵 Value: $${((pos.size || 0) * (pos.avgPrice || 0)).toFixed(2)}\n`;
+          if (pos.walletAlias) text += `   👤 Copied from: ${pos.walletAlias}\n`;
           text += '\n';
         });
 
@@ -63,7 +63,7 @@ export function registerPositionsHandler(bot: TelegramBot, db: UserDb, getBotMan
       const positions = state.positions ? Object.entries(state.positions) : [];
 
       if (positions.length === 0) {
-        await bot.answerCallbackQuery(query.id, { text: 'No positions to sell' });
+        await bot.answerCallbackQuery(query.id, { text: '📭 No positions to sell' });
         return;
       }
 
@@ -88,7 +88,7 @@ export function registerPositionsHandler(bot: TelegramBot, db: UserDb, getBotMan
       const userBot = botManager.getUserBot(chatId);
 
       if (!userBot) {
-        await bot.answerCallbackQuery(query.id, { text: 'Trading not active. Start trading first.' });
+        await bot.answerCallbackQuery(query.id, { text: '⚠️ Trading not active. Start trading first.' });
         return;
       }
 
@@ -184,7 +184,7 @@ export function registerPositionsHandler(bot: TelegramBot, db: UserDb, getBotMan
       db.saveUserState(chatId, state);
 
       await bot.editMessageText(
-        `✅ Sold: ${sold}, Failed: ${failed}`,
+        `✅ Sold: ${sold}${failed > 0 ? `, ❌ Failed: ${failed}` : ''}`,
         {
           chat_id: chatId,
           message_id: query.message.message_id,

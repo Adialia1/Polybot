@@ -12,10 +12,10 @@ export function registerStartHandler(bot: TelegramBot, db: UserDb): void {
     const tracked = db.getTrackedWallets(chatId);
 
     let welcome = `🤖 <b>Welcome to Polybot!</b>\n\n`;
-    welcome += `Multi-user Polymarket copy-trading bot.\n\n`;
-    welcome += `<b>Status:</b>\n`;
-    welcome += `• Wallets: ${wallets.length} connected\n`;
-    welcome += `• Following: ${tracked.filter(t => t.enabled).length} traders\n\n`;
+    welcome += `🤝 Multi-user Polymarket copy-trading bot.\n\n`;
+    welcome += `<b>📋 Status:</b>\n`;
+    welcome += `• 💼 Wallets: ${wallets.length} connected\n`;
+    welcome += `• 👁 Following: ${tracked.filter(t => t.enabled).length} traders\n\n`;
 
     if (wallets.length === 0) {
       welcome += `👉 Start by connecting your wallet!\n`;
