@@ -124,8 +124,8 @@ export class TelegramNotifier {
       const message = `
 ✅ <b>Bot Status: ACTIVE</b>
 
-<b>⏱ Uptime:</b> ${hours}h ${minutes}m ${seconds}s
-<b>📅 Started:</b> ${new Date(this.startTime).toLocaleString()}
+<b>Uptime:</b> ${hours}h ${minutes}m ${seconds}s
+<b>Started:</b> ${new Date(this.startTime).toLocaleString()}
       `.trim();
 
       await this.sendMessage(message);
@@ -145,9 +145,9 @@ export class TelegramNotifier {
       let message = '📊 <b>Open Positions</b>\n\n';
       positions.forEach((pos, i) => {
         message += `${i + 1}. <b>${pos.outcome}</b>\n`;
-        message += `   🏪 Market: ${pos.title}\n`;
-        message += `   📦 Size: ${pos.size.toFixed(4)} shares @ $${pos.avgPrice.toFixed(3)}\n`;
-        message += `   💵 Value: $${(pos.size * pos.avgPrice).toFixed(2)}\n\n`;
+        message += `   Market: ${pos.title}\n`;
+        message += `   Size: ${pos.size.toFixed(4)} shares @ $${pos.avgPrice.toFixed(3)}\n`;
+        message += `   Value: $${(pos.size * pos.avgPrice).toFixed(2)}\n\n`;
       });
 
       await this.sendMessage(message);
@@ -165,11 +165,11 @@ export class TelegramNotifier {
       const message = `
 📈 <b>Trading Statistics</b>
 
-<b>🔢 Total Trades:</b> ${stats.totalTrades}
-<b>✅ Successful:</b> ${stats.successfulTrades}
-<b>❌ Failed:</b> ${stats.failedTrades}
-<b>🎯 Success Rate:</b> ${successRate}%
-<b>💰 Total Volume:</b> $${stats.totalVolume.toFixed(2)}
+<b>Total Trades:</b> ${stats.totalTrades}
+<b>Successful:</b> ${stats.successfulTrades}
+<b>Failed:</b> ${stats.failedTrades}
+<b>Success Rate:</b> ${successRate}%
+<b>Total Volume:</b> $${stats.totalVolume.toFixed(2)}
       `.trim();
 
       await this.sendMessage(message);
@@ -194,7 +194,7 @@ export class TelegramNotifier {
           return;
         }
 
-        await this.sendMessage(`🎯 Found ${summary.count} redeemable position(s) worth ~$${summary.totalValue.toFixed(2)}. Redeeming...`);
+        await this.sendMessage(`Found ${summary.count} redeemable position(s) worth ~$${summary.totalValue.toFixed(2)}. Redeeming...`);
 
         const results = await this.redeemer.redeemAll();
         const succeeded = results.filter(r => r.success);
@@ -273,13 +273,13 @@ export class TelegramNotifier {
       const message = `
 🤖 <b>Available Commands</b>
 
-/status - ✅ Check if bot is active
-/positions - 📊 Show open positions
-/stats - 📈 Show trading statistics
-/balance - 💰 Show balance & redeemable positions
-/redeem - 🎯 Redeem all resolved winning positions
-/stop - 🛑 Stop the bot (auto-deploy will restart)
-/help - ❓ Show this help message
+/status - Check if bot is active
+/positions - Show open positions
+/stats - Show trading statistics
+/balance - Show balance & redeemable positions
+/redeem - Redeem all resolved winning positions
+/stop - Stop the bot (auto-deploy will restart)
+/help - Show this help message
       `.trim();
 
       await this.sendMessage(message);
@@ -335,14 +335,14 @@ export class TelegramNotifier {
     const message = `
 ${emoji} <b>Trade Executed</b>
 
-<b>📌 Side:</b> ${trade.side}
-<b>🏪 Market:</b> ${trade.title}
-<b>🎲 Outcome:</b> ${trade.outcome}
-<b>💵 Amount:</b> $${trade.amount.toFixed(2)}
-<b>💲 Price:</b> $${trade.price.toFixed(3)} (${(trade.price * 100).toFixed(1)}%)
-${trade.size ? `<b>📦 Size:</b> ${trade.size.toFixed(4)} shares` : ''}
-${trade.walletAlias ? `<b>👤 Copied from:</b> ${trade.walletAlias}` : ''}
-${trade.orderId ? `<b>🆔 Order ID:</b> <code>${trade.orderId}</code>` : ''}
+<b>Side:</b> ${trade.side}
+<b>Market:</b> ${trade.title}
+<b>Outcome:</b> ${trade.outcome}
+<b>Amount:</b> $${trade.amount.toFixed(2)}
+<b>Price:</b> $${trade.price.toFixed(3)} (${(trade.price * 100).toFixed(1)}%)
+${trade.size ? `<b>Size:</b> ${trade.size.toFixed(4)} shares` : ''}
+${trade.walletAlias ? `<b>Copied from:</b> ${trade.walletAlias}` : ''}
+${trade.orderId ? `<b>Order ID:</b> <code>${trade.orderId}</code>` : ''}
 `.trim();
 
     await this.sendMessage(message);
@@ -355,12 +355,12 @@ ${trade.orderId ? `<b>🆔 Order ID:</b> <code>${trade.orderId}</code>` : ''}
     const message = `
 ❌ <b>Trade Failed</b>
 
-<b>📌 Side:</b> ${trade.side}
-<b>🏪 Market:</b> ${trade.title}
-<b>🎲 Outcome:</b> ${trade.outcome}
-<b>💵 Amount:</b> $${trade.amount.toFixed(2)}
-${trade.walletAlias ? `<b>👤 Copied from:</b> ${trade.walletAlias}` : ''}
-<b>⚠️ Error:</b> ${trade.error}
+<b>Side:</b> ${trade.side}
+<b>Market:</b> ${trade.title}
+<b>Outcome:</b> ${trade.outcome}
+<b>Amount:</b> $${trade.amount.toFixed(2)}
+${trade.walletAlias ? `<b>Copied from:</b> ${trade.walletAlias}` : ''}
+<b>Error:</b> ${trade.error}
 `.trim();
 
     await this.sendMessage(message);
@@ -381,12 +381,12 @@ ${trade.walletAlias ? `<b>👤 Copied from:</b> ${trade.walletAlias}` : ''}
     const message = `
 ${emoji} <b>${typeLabel} Triggered</b>
 
-<b>🏪 Market:</b> ${trigger.title}
-<b>🎲 Outcome:</b> ${trigger.outcome}
-<b>📥 Entry Price:</b> $${trigger.entryPrice.toFixed(3)}
-<b>📊 Current Price:</b> $${trigger.currentPrice.toFixed(3)}
-<b>💹 P&L:</b> ${pnlSign}${trigger.pnlPercent.toFixed(1)}%
-<b>📦 Size:</b> ${trigger.size.toFixed(4)} shares
+<b>Market:</b> ${trigger.title}
+<b>Outcome:</b> ${trigger.outcome}
+<b>Entry Price:</b> $${trigger.entryPrice.toFixed(3)}
+<b>Current Price:</b> $${trigger.currentPrice.toFixed(3)}
+<b>P&L:</b> ${pnlSign}${trigger.pnlPercent.toFixed(1)}%
+<b>Size:</b> ${trigger.size.toFixed(4)} shares
 
 ${statusLine}
 `.trim();
@@ -420,11 +420,11 @@ ${statusLine}
     const message = `
 🚀 <b>Polybot Started</b>
 
-<b>🔧 Mode:</b> ${modeEmoji} ${mode}
-<b>👁 Tracking:</b> ${config.wallets.join(', ') || 'None'}
-<b>💵 Account Size:</b> $${config.accountSize.toFixed(2)}
-<b>💰 Max Per Trade:</b> $${config.maxPositionSize.toFixed(2)}
-<b>📦 Current Positions:</b> ${config.positionCount}
+<b>Mode:</b> ${modeEmoji} ${mode}
+<b>Tracking:</b> ${config.wallets.join(', ') || 'None'}
+<b>Account Size:</b> $${config.accountSize.toFixed(2)}
+<b>Max Per Trade:</b> $${config.maxPositionSize.toFixed(2)}
+<b>Current Positions:</b> ${config.positionCount}
 `.trim();
 
     await this.sendMessage(message);
@@ -448,12 +448,12 @@ ${statusLine}
 
       message += `
 
-<b>📋 Session Stats:</b>
-• 🔢 Total Trades: ${stats.totalTrades}
-• ✅ Successful: ${stats.successfulTrades}
-• ❌ Failed: ${stats.failedTrades}
-• 🎯 Success Rate: ${successRate}%
-• 💰 Volume: $${stats.totalVolume.toFixed(2)}`;
+<b>Session Stats:</b>
+• Total Trades: ${stats.totalTrades}
+• Successful: ${stats.successfulTrades}
+• Failed: ${stats.failedTrades}
+• Success Rate: ${successRate}%
+• Volume: $${stats.totalVolume.toFixed(2)}`;
     }
 
     await this.sendMessage(message);
@@ -469,7 +469,7 @@ ${statusLine}
 
     let positionsText = '';
     if (summary.positions.length === 0) {
-      positionsText = '📭 No open positions';
+      positionsText = 'No open positions';
     } else {
       positionsText = summary.positions.map(pos => {
         const pnlText = pos.pnlPercent !== undefined
@@ -482,12 +482,12 @@ ${statusLine}
     const message = `
 📊 <b>Daily Summary</b>
 
-<b>📋 Trading Stats:</b>
-• 🔢 Total Trades: ${summary.totalTrades}
-• ✅ Successful: ${summary.successfulTrades}
-• ❌ Failed: ${summary.failedTrades}
-• 🎯 Success Rate: ${successRate}%
-• 💰 Volume: $${summary.totalVolume.toFixed(2)}
+<b>Trading Stats:</b>
+• Total Trades: ${summary.totalTrades}
+• Successful: ${summary.successfulTrades}
+• Failed: ${summary.failedTrades}
+• Success Rate: ${successRate}%
+• Volume: $${summary.totalVolume.toFixed(2)}
 
 <b>Open Positions (${summary.positions.length}):</b>
 ${positionsText}
